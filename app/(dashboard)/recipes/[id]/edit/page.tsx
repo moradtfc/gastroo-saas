@@ -98,8 +98,8 @@ export default function EditRecipePage({ params }: EditRecipePageProps) {
             quantity,
             unit,
             cost,
-            ingredient_id,
-            ingredients (
+            article_id,
+            articles (
               id,
               name,
               unit,
@@ -179,7 +179,7 @@ export default function EditRecipePage({ params }: EditRecipePageProps) {
       if (formData.recipeIngredients.length > 0) {
         const ingredientsToInsert = formData.recipeIngredients.map(ri => ({
           recipe_id: params.id,
-          ingredient_id: ri.ingredient_id || ri.ingredients?.id,
+          article_id: ri.article_id || ri.articles?.id,
           quantity: ri.quantity,
           unit: ri.unit,
           cost: ri.cost || 0
@@ -209,11 +209,11 @@ export default function EditRecipePage({ params }: EditRecipePageProps) {
   const addIngredient = () => {
     const newIngredient = {
       id: `temp_${Date.now()}`,
-      ingredient_id: "",
+      article_id: "",
       quantity: "",
       unit: "g",
       cost: 0,
-      ingredients: null
+      articles: null
     }
     setFormData(prev => ({
       ...prev,
@@ -236,10 +236,10 @@ export default function EditRecipePage({ params }: EditRecipePageProps) {
           const updated = { ...ing, [field]: value }
           
           // If ingredient is changed, update cost calculation
-          if (field === 'ingredient_id') {
+          if (field === 'article_id') {
             const selectedIngredient = ingredients.find(ingredient => ingredient.id === value)
             if (selectedIngredient) {
-              updated.ingredients = selectedIngredient
+              updated.articles = selectedIngredient
               updated.unit = selectedIngredient.unit
               updated.cost = (parseFloat(updated.quantity) || 0) * (selectedIngredient.cost_per_unit || 0)
             }
@@ -472,8 +472,8 @@ export default function EditRecipePage({ params }: EditRecipePageProps) {
                           <TableRow key={ingredient.id || index}>
                             <TableCell>
                               <Select 
-                                value={ingredient.ingredient_id || ingredient.ingredients?.id || ""} 
-                                onValueChange={(value) => updateIngredient(index, "ingredient_id", value)}
+                                value={ingredient.article_id || ingredient.articles?.id || ""} 
+                                onValueChange={(value) => updateIngredient(index, "article_id", value)}
                               >
                                 <SelectTrigger className="w-full">
                                   <SelectValue placeholder="Seleccionar ingrediente" />

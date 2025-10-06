@@ -89,8 +89,8 @@ export default function EditPurchasePage({ params }: { params: { id: string } })
       // Set purchase items
       const items = purchaseData.purchase_items?.map((item: any) => ({
         id: item.id,
-        ingredientId: item.ingredient_id,
-        ingredientName: item.ingredients?.name || 'Ingrediente desconocido',
+        ingredientId: item.article_id,
+        ingredientName: item.articles?.name || 'Artículo desconocido',
         unit: item.unit,
         quantity: item.quantity.toString(),
         price: item.unit_cost.toString(),

@@ -251,7 +251,7 @@ export default function PurchaseDetailPage({ params }: { params: { id: string } 
                           {item.ingredients?.name || 'Ingrediente desconocido'}
                         </TableCell>
                         <TableCell>
-                          {item.quantity} {item.unit_info?.symbol || item.unit}
+                          {item.quantity} {item.unit_info?.symbol || (typeof item.unit === 'string' && item.unit.length < 10 ? item.unit : 'ud')}
                         </TableCell>
                         <TableCell>€{(item.unit_cost || 0).toFixed(2)}</TableCell>
                         <TableCell className="font-bold">€{(item.total_cost || 0).toFixed(2)}</TableCell>

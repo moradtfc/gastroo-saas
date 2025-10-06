@@ -1,0 +1,829 @@
+"use client"
+
+import { useState, useEffect, useRef } from "react"
+import { Search, Filter, ChevronDown, Plus, MoreVertical, ArrowUpDown } from "lucide-react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { DatabaseService, type FoodCategory, type Unit } from "@/lib/database"
+import { toast } from "sonner"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { cn } from "@/lib/utils"
+
+interface Article {
+  id: string
+  name: string
+  category: string | null
+  cost_per_unit: number
+  current_stock: number
+  unit: string
+  image_url?: string | null
+  sku?: string | null
+  suppliers?: {
+    name: string
+  } | null
+}
+
+export default function ArticlesPage() {
+  const router = useRouter()
+  const [articles, setArticles] = useState<Article[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [selectedItems, setSelectedItems] = useState<string[]>([])
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [showBanner, setShowBanner] = useState(true)
+  const [openActionsMenu, setOpenActionsMenu] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
+  const [foodCategories, setFoodCategories] = useState<FoodCategory[]>([])
+  const [units, setUnits] = useState<Unit[]>([])
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([])
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null)
+  const [sortBy, setSortBy] = useState<"price" | "name" | "stock" | null>(null)
+  const [showQuickCreate, setShowQuickCreate] = useState(false)
+  const [quickCreateData, setQuickCreateData] = useState({
+    name: "",
+    categoryId: "",
+    costPerUnit: "",
+    currentStock: ""
+  })
+  const menuRef = useRef<HTMLDivElement>(null)
+  const actionsMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    loadArticles()
+    loadCategories()
+    loadUnits()
+  }, [])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenMenuId(null)
+      }
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(event.target as Node)) {
+        setOpenActionsMenu(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
+  const loadArticles = async () => {
+    try {
+      setLoading(true)
+      const data = await DatabaseService.getArticles()
+      setArticles(data || [])
+    } catch (error) {
+      console.error("Error loading articles:", error)
+      toast.error("Error al cargar artículos")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadCategories = async () => {
+    try {
+      const data = await DatabaseService.getFoodCategories()
+      setFoodCategories(data || [])
+    } catch (error) {
+      console.error("Error loading categories:", error)
+    }
+  }
+
+  const loadUnits = async () => {
+    try {
+      const data = await DatabaseService.getUnits()
+      setUnits(data || [])
+    } catch (error) {
+      console.error("Error loading units:", error)
+    }
+  }
+
+  const handleCategoryToggle = (categoryId: string) => {
+    setSelectedCategories(prev => {
+      if (prev.includes(categoryId)) {
+        return prev.filter(id => id !== categoryId)
+      } else {
+        return [...prev, categoryId]
+      }
+    })
+  }
+
+  const handleSaveCategories = () => {
+    setIsCategoryModalOpen(false)
+  }
+
+  const handleClearCategories = () => {
+    setSelectedCategories([])
+    setIsCategoryModalOpen(false)
+  }
+
+  const toggleSortOrder = (type: "price" | "name" | "stock") => {
+    if (sortBy === type) {
+      if (sortOrder === "asc") {
+        setSortOrder("desc")
+      } else if (sortOrder === "desc") {
+        setSortBy(null)
+        setSortOrder(null)
+      }
+    } else {
+      setSortBy(type)
+      setSortOrder("asc")
+    }
+  }
+
+  const handleQuickCreate = async () => {
+    if (!quickCreateData.name.trim()) {
+      toast.error("El nombre es obligatorio")
+      return
+    }
+    if (!quickCreateData.categoryId) {
+      toast.error("La categoría es obligatoria")
+      return
+    }
+    if (!quickCreateData.costPerUnit || parseFloat(quickCreateData.costPerUnit) <= 0) {
+      toast.error("El precio es obligatorio y debe ser mayor a 0")
+      return
+    }
+    if (!quickCreateData.currentStock || parseFloat(quickCreateData.currentStock) < 0) {
+      toast.error("El stock es obligatorio y no puede ser negativo")
+      return
+    }
+
+    try {
+      // Obtener la primera unidad disponible como predeterminada
+      const defaultUnit = units[0]
+      if (!defaultUnit) {
+        toast.error("No hay unidades disponibles")
+        return
+      }
+
+      const selectedCategory = foodCategories.find(c => c.id === quickCreateData.categoryId)
+
+      const articleData: any = {
+        name: quickCreateData.name,
+        food_category_id: quickCreateData.categoryId,
+        unit_id: defaultUnit.id,
+        default_unit_id: defaultUnit.id,
+        cost_per_unit: parseFloat(quickCreateData.costPerUnit),
+        current_stock: parseFloat(quickCreateData.currentStock),
+        category: selectedCategory?.name || undefined,
+        unit: defaultUnit.symbol || defaultUnit.name
+      }
+
+      await DatabaseService.createIngredient(articleData)
+      toast.success("Artículo creado exitosamente")
+      setShowQuickCreate(false)
+      setQuickCreateData({ name: "", categoryId: "", costPerUnit: "", currentStock: "" })
+      loadArticles()
+    } catch (error) {
+      console.error("Error creando artículo:", error)
+      toast.error("Error al crear artículo")
+    }
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedItems.length === filteredArticles.length) {
+      setSelectedItems([])
+    } else {
+      setSelectedItems(filteredArticles.map((a) => a.id))
+    }
+  }
+
+  const toggleSelectItem = (id: string) => {
+    if (selectedItems.includes(id)) {
+      setSelectedItems(selectedItems.filter((i) => i !== id))
+    } else {
+      setSelectedItems([...selectedItems, id])
+    }
+  }
+
+  const toggleMenu = (id: string) => {
+    setOpenMenuId(openMenuId === id ? null : id)
+  }
+
+  const handleEdit = (article: Article) => {
+    router.push(`/articles/${article.id}/edit`)
+    setOpenMenuId(null)
+  }
+
+  const handleView = (article: Article) => {
+    router.push(`/articles/${article.id}`)
+    setOpenMenuId(null)
+  }
+
+  const handleDelete = async (articleId: string) => {
+    if (!confirm("¿Estás seguro de que deseas eliminar este artículo?")) {
+      return
+    }
+
+    try {
+      setDeletingId(articleId)
+      
+      // Eliminar referencias relacionadas
+      await DatabaseService.supabase
+        .from('recipe_ingredients')
+        .delete()
+        .eq('article_id', articleId)
+
+      await DatabaseService.supabase
+        .from('purchase_items')
+        .delete()
+        .eq('article_id', articleId)
+
+      await DatabaseService.supabase
+        .from('article_allergens')
+        .delete()
+        .eq('article_id', articleId)
+
+      // Eliminar el artículo
+      const { error } = await DatabaseService.supabase
+        .from('articles')
+        .delete()
+        .eq('id', articleId)
+
+      if (error) throw error
+
+      toast.success("Artículo eliminado correctamente")
+      loadArticles()
+      setOpenMenuId(null)
+    } catch (error) {
+      console.error("Error eliminando artículo:", error)
+      toast.error("Error al eliminar artículo")
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const handleDeleteMultiple = async () => {
+    if (selectedItems.length === 0) return
+    
+    if (!confirm(`¿Estás seguro de que deseas eliminar ${selectedItems.length} artículo(s)?`)) {
+      return
+    }
+
+    try {
+      for (const articleId of selectedItems) {
+        // Eliminar referencias relacionadas
+        await DatabaseService.supabase
+          .from('recipe_ingredients')
+          .delete()
+          .eq('article_id', articleId)
+
+        await DatabaseService.supabase
+          .from('purchase_items')
+          .delete()
+          .eq('article_id', articleId)
+
+        await DatabaseService.supabase
+          .from('article_allergens')
+          .delete()
+          .eq('article_id', articleId)
+
+        // Eliminar el artículo
+        await DatabaseService.supabase
+          .from('articles')
+          .delete()
+          .eq('id', articleId)
+      }
+
+      toast.success(`${selectedItems.length} artículo(s) eliminado(s) correctamente`)
+      setSelectedItems([])
+      loadArticles()
+    } catch (error) {
+      console.error("Error eliminando artículos:", error)
+      toast.error("Error al eliminar artículos")
+    }
+  }
+
+  const handleEditMultiple = () => {
+    toast.info("Función de edición múltiple en desarrollo")
+  }
+
+  const getInitials = (name: string) => {
+    if (!name) return "?"
+    const words = name.trim().split(" ")
+    if (words.length >= 2) {
+      return (words[0][0] + words[1][0]).toUpperCase()
+    }
+    return name.substring(0, 2).toUpperCase()
+  }
+
+  const getColorFromName = (name: string) => {
+    const colors = [
+      "bg-blue-500",
+      "bg-green-500",
+      "bg-purple-500",
+      "bg-pink-500",
+      "bg-orange-500",
+      "bg-teal-500",
+      "bg-indigo-500",
+      "bg-red-500",
+    ]
+    const index = name.charCodeAt(0) % colors.length
+    return colors[index]
+  }
+
+  const filteredArticles = articles
+    .filter((article) => {
+      const matchesSearch = article.name.toLowerCase().includes(searchTerm.toLowerCase())
+      
+      // Filtrar por categorías si hay alguna seleccionada
+      if (selectedCategories.length > 0) {
+        const selectedCategoryNames = foodCategories
+          .filter(cat => selectedCategories.includes(cat.id))
+          .map(cat => cat.name)
+        
+        const matchesCategory = article.category && selectedCategoryNames.includes(article.category)
+        return matchesSearch && matchesCategory
+      }
+      
+      return matchesSearch
+    })
+    .sort((a, b) => {
+      if (sortOrder === null || sortBy === null) return 0
+      
+      if (sortBy === "price") {
+        const priceA = a.cost_per_unit || 0
+        const priceB = b.cost_per_unit || 0
+        return sortOrder === "asc" ? priceA - priceB : priceB - priceA
+      } else if (sortBy === "name") {
+        const nameA = a.name.toLowerCase()
+        const nameB = b.name.toLowerCase()
+        return sortOrder === "asc" 
+          ? nameA.localeCompare(nameB)
+          : nameB.localeCompare(nameA)
+      } else if (sortBy === "stock") {
+        const stockA = a.current_stock || 0
+        const stockB = b.current_stock || 0
+        return sortOrder === "asc" ? stockA - stockB : stockB - stockA
+      }
+      
+      return 0
+    })
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {/* Modal de selección de categorías */}
+      <Dialog open={isCategoryModalOpen} onOpenChange={setIsCategoryModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-xl">Filtrar por Categorías</DialogTitle>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto">
+            {foodCategories.length === 0 ? (
+              <div className="py-12 text-center">
+                <div className="text-4xl mb-4">📁</div>
+                <p className="text-gray-600">No hay categorías disponibles</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {foodCategories.map((category) => {
+                  const isSelected = selectedCategories.includes(category.id)
+                  return (
+                    <div
+                      key={category.id}
+                      className={cn(
+                        "p-4 border rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50",
+                        isSelected ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200" : "border-gray-200"
+                      )}
+                      onClick={() => handleCategoryToggle(category.id)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">{category.icon || "📁"}</span>
+                          <span className="font-medium text-gray-900">{category.name}</span>
+                        </div>
+                        {isSelected && (
+                          <span className="text-blue-600 text-xl">✓</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t pt-4 mt-4 flex justify-between">
+            <Button 
+              variant="outline" 
+              onClick={handleClearCategories}
+              className="cursor-pointer"
+            >
+              Limpiar todo
+            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => setIsCategoryModalOpen(false)}
+                className="cursor-pointer"
+              >
+                Cancelar
+              </Button>
+              <Button 
+                className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                onClick={handleSaveCategories}
+              >
+                Aplicar ({selectedCategories.length})
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-7xl mx-auto">
+        {/* Banner de información */}
+        {showBanner && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center text-white text-sm font-bold">
+                i
+              </div>
+              <span className="text-gray-700">
+                <strong>¿Ya tienes artículos?</strong> Sube un catálogo para empezar.
+              </span>
+            </div>
+            <div className="flex items-center gap-4">
+              <button className="text-blue-600 font-medium hover:text-blue-700 transition-colors cursor-pointer">
+                Importar colección
+              </button>
+              <button
+                onClick={() => setShowBanner(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Barra de búsqueda y filtros */}
+        <div className="flex items-center gap-4 mb-6 flex-wrap">
+          <div className="flex-1 min-w-[300px] relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input
+              type="text"
+              placeholder="Buscar"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            />
+          </div>
+
+          <button 
+            onClick={() => setIsCategoryModalOpen(true)}
+            className={cn(
+              "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors",
+              selectedCategories.length > 0 && "border-blue-500 bg-blue-50"
+            )}
+          >
+            Categoría
+            {selectedCategories.length > 0 && (
+              <span className="ml-1 px-2 py-0.5 bg-blue-600 text-white text-xs rounded-full">
+                {selectedCategories.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => toggleSortOrder("price")}
+            className={cn(
+              "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer",
+              sortBy === "price" && "border-blue-500 bg-blue-50"
+            )}
+          >
+            <ArrowUpDown size={18} />
+            {sortBy === "price" 
+              ? sortOrder === "asc" ? "Precio: Menor a Mayor" : "Precio: Mayor a Menor"
+              : "Ordenar por precio"}
+          </button>
+
+          <button
+            onClick={() => toggleSortOrder("name")}
+            className={cn(
+              "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer",
+              sortBy === "name" && "border-blue-500 bg-blue-50"
+            )}
+          >
+            <ArrowUpDown size={18} />
+            {sortBy === "name" 
+              ? sortOrder === "asc" ? "A-Z" : "Z-A"
+              : "Ordenar alfabéticamente"}
+          </button>
+
+          <button
+            onClick={() => toggleSortOrder("stock")}
+            className={cn(
+              "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer",
+              sortBy === "stock" && "border-blue-500 bg-blue-50"
+            )}
+          >
+            <ArrowUpDown size={18} />
+            {sortBy === "stock" 
+              ? sortOrder === "asc" ? "Stock: Menor a Mayor" : "Stock: Mayor a Menor"
+              : "Ordenar por stock"}
+          </button>
+
+          <div className="relative" ref={actionsMenuRef}>
+            <button 
+              onClick={() => setOpenActionsMenu(!openActionsMenu)}
+              className="px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer"
+            >
+              Acciones
+              <ChevronDown size={18} />
+            </button>
+
+            {openActionsMenu && (
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-10">
+                <button
+                  onClick={() => {
+                    setOpenActionsMenu(false)
+                    toast.info("Función de importación en desarrollo")
+                  }}
+                  className="w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer"
+                >
+                  Importar colección
+                </button>
+                <button
+                  onClick={() => {
+                    setOpenActionsMenu(false)
+                    toast.info("Función de exportación en desarrollo")
+                  }}
+                  className="w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer"
+                >
+                  Exportar colección
+                </button>
+              </div>
+            )}
+          </div>
+
+          <Link href="/articles/new">
+            <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm cursor-pointer">
+              Crear artículo
+            </button>
+          </Link>
+        </div>
+
+        {/* Tabla de artículos */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+          {/* Enlace para crear artículo rápidamente */}
+          <div className="border-b border-gray-200 p-4">
+            {!showQuickCreate ? (
+              <button 
+                onClick={() => setShowQuickCreate(true)}
+                className="text-blue-600 hover:text-blue-700 flex items-center gap-2 font-medium transition-colors cursor-pointer"
+              >
+                <Plus size={18} />
+                Crear artículo rápidamente
+              </button>
+            ) : (
+              <div className="grid grid-cols-12 gap-4 items-center">
+                <div className="col-span-3">
+                  <Input
+                    placeholder="Nombre del artículo"
+                    value={quickCreateData.name}
+                    onChange={(e) => setQuickCreateData(prev => ({ ...prev, name: e.target.value }))}
+                    className="h-10"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <select
+                    value={quickCreateData.categoryId}
+                    onChange={(e) => setQuickCreateData(prev => ({ ...prev, categoryId: e.target.value }))}
+                    className="w-full h-10 px-3 border border-gray-300 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Seleccionar categoría</option>
+                    {foodCategories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Precio (€)"
+                    value={quickCreateData.costPerUnit}
+                    onChange={(e) => {
+                      const sanitized = e.target.value.replace(/[^0-9.]/g, '')
+                      setQuickCreateData(prev => ({ ...prev, costPerUnit: sanitized }))
+                    }}
+                    className="h-10"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Stock"
+                    value={quickCreateData.currentStock}
+                    onChange={(e) => {
+                      const sanitized = e.target.value.replace(/[^0-9.]/g, '')
+                      setQuickCreateData(prev => ({ ...prev, currentStock: sanitized }))
+                    }}
+                    className="h-10"
+                  />
+                </div>
+                <div className="col-span-3 flex gap-2 justify-end">
+                  <Button
+                    onClick={handleQuickCreate}
+                    className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                  >
+                    Crear
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowQuickCreate(false)
+                      setQuickCreateData({ name: "", categoryId: "", costPerUnit: "", currentStock: "" })
+                    }}
+                    className="cursor-pointer"
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Encabezados de tabla */}
+          <div className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 bg-gray-50 font-medium text-sm text-gray-700">
+            <div className="col-span-1 flex items-center">
+              <input
+                type="checkbox"
+                checked={
+                  filteredArticles.length > 0 &&
+                  selectedItems.length === filteredArticles.length
+                }
+                onChange={toggleSelectAll}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+            </div>
+            <div className="col-span-4">Nombre</div>
+            <div className="col-span-3">Categoría</div>
+            <div className="col-span-2">Precio</div>
+            <div className="col-span-2">Stock</div>
+          </div>
+
+          {/* Filas de artículos */}
+          {filteredArticles.length === 0 ? (
+            <div className="p-12 text-center">
+              <div className="text-6xl mb-4">📦</div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No hay artículos</h3>
+              <p className="text-gray-500 mb-4">
+                {searchTerm
+                  ? "No se encontraron artículos con ese nombre"
+                  : "Comienza creando tu primer artículo"}
+              </p>
+              <Link href="/articles/new">
+                <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors">
+                  <Plus className="inline-block mr-2" size={18} />
+                  Crear artículo
+                </button>
+              </Link>
+            </div>
+          ) : (
+            filteredArticles.map((article) => (
+              <div
+                key={article.id}
+                className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 hover:bg-gray-50 items-center transition-colors"
+              >
+                <div className="col-span-1 flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={selectedItems.includes(article.id)}
+                    onChange={() => toggleSelectItem(article.id)}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                </div>
+
+                <div className="col-span-4 flex items-center gap-3">
+                  <div
+                    className={`w-10 h-10 rounded flex items-center justify-center text-white text-sm font-semibold ${getColorFromName(
+                      article.name
+                    )}`}
+                  >
+                    {getInitials(article.name)}
+                  </div>
+                  <Link href={`/articles/${article.id}`}>
+                    <span className="text-blue-600 font-medium hover:underline cursor-pointer">
+                      {article.name}
+                    </span>
+                  </Link>
+                </div>
+
+                <div className="col-span-3 text-gray-700">
+                  {article.category || (
+                    <span className="text-gray-400 italic">Sin categoría</span>
+                  )}
+                </div>
+
+                <div className="col-span-2 text-gray-700">
+                  €{(article.cost_per_unit || 0).toFixed(2)}/{article.unit || "ud"}
+                </div>
+
+                <div className="col-span-2 flex items-center justify-between">
+                  <span className="text-gray-700">
+                    {typeof article.current_stock === "number"
+                      ? `${article.current_stock.toLocaleString()} ${article.unit || "ud"}`
+                      : "Sin stock"}
+                  </span>
+                  <div
+                    className="relative"
+                    ref={openMenuId === article.id ? menuRef : null}
+                  >
+                    <button
+                      onClick={() => toggleMenu(article.id)}
+                      className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition-colors"
+                    >
+                      <MoreVertical size={20} />
+                    </button>
+
+                    {openMenuId === article.id && (
+                      <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-10">
+                        <button
+                          onClick={() => handleView(article)}
+                          className="w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer"
+                        >
+                          Ver detalles
+                        </button>
+                        <button
+                          onClick={() => handleEdit(article)}
+                          className="w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => handleDelete(article.id)}
+                          disabled={deletingId === article.id}
+                          className="w-full text-left px-4 py-3 hover:bg-red-50 text-red-600 text-sm transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          {deletingId === article.id ? "Eliminando..." : "Eliminar"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Información de resultados */}
+        {filteredArticles.length > 0 && (
+          <div className="mt-4 text-sm text-gray-600 text-center">
+            Mostrando {filteredArticles.length} de {articles.length} artículo(s)
+          </div>
+        )}
+
+        {/* Barra inferior de selección múltiple */}
+        {selectedItems.length > 0 && (
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50">
+            <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <span className="text-gray-700 font-medium">
+                  {selectedItems.length} seleccionado{selectedItems.length > 1 ? "s" : ""}
+                </span>
+                <button
+                  onClick={() => setSelectedItems([])}
+                  className="text-blue-600 hover:text-blue-700 font-medium transition-colors cursor-pointer"
+                >
+                  Desmarcar todo
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleDeleteMultiple}
+                  className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors shadow-sm cursor-pointer"
+                >
+                  Eliminar artículos
+                </button>
+                <button
+                  onClick={handleEditMultiple}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm cursor-pointer"
+                >
+                  Editar artículos
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        </div>
+      </div>
+    </>
+  )
+}

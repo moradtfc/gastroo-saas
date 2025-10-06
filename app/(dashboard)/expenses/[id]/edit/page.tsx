@@ -96,7 +96,7 @@ export default function EditExpensePage({ params }: { params: { id: string } }) 
                   inventario.
                 </p>
                 <div className="mt-4">
-                  <Link href="/ingredients">
+                  <Link href="/articles">
                     <Button variant="outline" className="border-red-300 text-red-700 hover:bg-red-100 bg-transparent">
                       Ir a Inventario
                     </Button>

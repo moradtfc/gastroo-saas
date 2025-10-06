@@ -20,7 +20,7 @@ import {
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Ingredientes", href: "/ingredients", icon: ShoppingCart },
+  { name: "Inventario", href: "/articles", icon: ShoppingCart },
   { name: "Proveedores", href: "/suppliers", icon: Building },
   { name: "Compras", href: "/purchases", icon: Package },
   { name: "Recetas", href: "/recipes", icon: ChefHat },

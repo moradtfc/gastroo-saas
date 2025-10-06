@@ -5,8 +5,8 @@ INSERT INTO suppliers (name, address, phone, email, category, contact_person) VA
 ('Pescados del Mar', 'Puerto de Valencia, Muelle 7', '+34 96 345 6789', 'ventas@pescadosdelmar.es', 'Pescados y Mariscos', 'Pedro Martín'),
 ('Lácteos Frescos SL', 'Polígono Industrial Norte 12', '+34 96 456 7890', 'comercial@lacteosfresco.es', 'Lácteos', 'Ana Ruiz');
 
--- Insert sample ingredients
-INSERT INTO ingredients (name, category, unit, cost_per_unit, current_stock, min_stock, supplier_id) VALUES
+-- Insert sample articles (inventory items)
+INSERT INTO articles (name, category, unit, cost_per_unit, current_stock, min_stock, supplier_id) VALUES
 ('Tomate', 'Verduras', 'kg', 2.50, 25.0, 5.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
 ('Lechuga', 'Verduras', 'kg', 1.80, 15.0, 3.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
 ('Cebolla', 'Verduras', 'kg', 1.20, 30.0, 10.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
@@ -39,24 +39,24 @@ INSERT INTO recipes (name, description, category, servings, cooking_time, diffic
 3. Cocinar 4 minutos por lado
 4. Servir con verduras');
 
--- Insert recipe ingredients
-INSERT INTO recipe_ingredients (recipe_id, ingredient_id, quantity, unit, cost) VALUES
+-- Insert recipe ingredients (using article_id now)
+INSERT INTO recipe_ingredients (recipe_id, article_id, quantity, unit, cost) VALUES
 -- Paella Valenciana
-((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM ingredients WHERE name = 'Arroz Bomba'), 320, 'g', 1.44),
-((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM ingredients WHERE name = 'Pollo'), 800, 'g', 6.80),
-((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM ingredients WHERE name = 'Tomate'), 150, 'g', 0.38),
-((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM ingredients WHERE name = 'Pimiento Rojo'), 100, 'g', 0.32),
-((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM ingredients WHERE name = 'Aceite de Oliva'), 50, 'ml', 0.45),
+((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Arroz Bomba'), 320, 'g', 1.44),
+((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Pollo'), 800, 'g', 6.80),
+((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Tomate'), 150, 'g', 0.38),
+((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Pimiento Rojo'), 100, 'g', 0.32),
+((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Aceite de Oliva'), 50, 'ml', 0.45),
 
 -- Ensalada Mediterránea
-((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM ingredients WHERE name = 'Lechuga'), 200, 'g', 0.36),
-((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM ingredients WHERE name = 'Tomate'), 150, 'g', 0.38),
-((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM ingredients WHERE name = 'Cebolla'), 50, 'g', 0.06),
-((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM ingredients WHERE name = 'Aceite de Oliva'), 30, 'ml', 0.27),
+((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Lechuga'), 200, 'g', 0.36),
+((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Tomate'), 150, 'g', 0.38),
+((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Cebolla'), 50, 'g', 0.06),
+((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Aceite de Oliva'), 30, 'ml', 0.27),
 
 -- Salmón a la Plancha
-((SELECT id FROM recipes WHERE name = 'Salmón a la Plancha'), (SELECT id FROM ingredients WHERE name = 'Salmón'), 200, 'g', 3.78),
-((SELECT id FROM recipes WHERE name = 'Salmón a la Plancha'), (SELECT id FROM ingredients WHERE name = 'Aceite de Oliva'), 20, 'ml', 0.18);
+((SELECT id FROM recipes WHERE name = 'Salmón a la Plancha'), (SELECT id FROM articles WHERE name = 'Salmón'), 200, 'g', 3.78),
+((SELECT id FROM recipes WHERE name = 'Salmón a la Plancha'), (SELECT id FROM articles WHERE name = 'Aceite de Oliva'), 20, 'ml', 0.18);
 
 -- Insert sample menus
 INSERT INTO menus (name, description, category, status) VALUES
