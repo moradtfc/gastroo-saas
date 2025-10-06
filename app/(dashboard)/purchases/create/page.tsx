@@ -11,20 +11,23 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Trash2, Calendar, Package, CheckCircle, ArrowLeft } from "lucide-react"
+import { Plus, Trash2, Calendar, Package, CheckCircle, ArrowLeft, Search } from "lucide-react"
 import Link from "next/link"
 import { DatabaseService, type Supplier, type Unit } from "@/lib/database"
 import { toast } from "sonner"
 import { SuccessModal } from "@/components/ui/success-modal"
-import { UnitConversionErrorModal } from "@/components/ui/unit-conversion-error-modal"
 
 interface Ingredient {
   id: string
   name: string
-  unit: string
   category?: string
   current_stock?: number
   cost_per_unit?: number
+  unit: string // legacy fallback
+  unit_id?: string
+  default_unit_id?: string
+  unit_info?: Unit
+  default_unit_info?: Unit
 }
 
 interface PurchaseItem {
@@ -58,26 +61,23 @@ export default function CreatePurchasePage() {
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [successData, setSuccessData] = useState<any>(null)
 
-  // Unit conversion error modal state
-  const [showConversionErrorModal, setShowConversionErrorModal] = useState(false)
-  const [conversionError, setConversionError] = useState<{
-    ingredientName: string
-    fromUnit: string
-    toUnit: string
-    errorMessage: string
-    fromCategory?: string
-    toCategory?: string
-  } | null>(null)
 
   // Form state for adding new item
   const [selectedIngredient, setSelectedIngredient] = useState("")
   const [selectedUnit, setSelectedUnit] = useState("")
   const [quantity, setQuantity] = useState("")
   const [price, setPrice] = useState("")
+  const [ingredientSearchTerm, setIngredientSearchTerm] = useState("")
+  const [unitSearchTerm, setUnitSearchTerm] = useState("")
 
   useEffect(() => {
     loadData()
   }, [])
+
+  // Reset unit selection when ingredient changes
+  useEffect(() => {
+    setSelectedUnit("")
+  }, [selectedIngredient])
 
   const loadData = async () => {
     try {
@@ -90,10 +90,10 @@ export default function CreatePurchasePage() {
       setIngredients(ingredientsData || [])
       setSuppliers(suppliersData || [])
       setUnits(unitsData || [])
-      console.log('Loaded data:', { 
-        ingredients: ingredientsData?.length, 
+      console.log('Loaded data:', {
+        ingredients: ingredientsData?.length,
         suppliers: suppliersData?.length,
-        units: unitsData?.length 
+        units: unitsData?.length
       })
       if (ingredientsData && ingredientsData.length > 0) {
         toast.success(`${ingredientsData.length} ingredientes, ${suppliersData?.length || 0} proveedores y ${unitsData?.length || 0} unidades cargados`)
@@ -120,26 +120,10 @@ export default function CreatePurchasePage() {
       return
     }
 
-    // Check if unit conversion is valid (if ingredient has a default unit)
-    const ingredientWithUnits = ingredient as any
-    if (ingredientWithUnits.default_unit_id && ingredientWithUnits.default_unit_id !== selectedUnit) {
-      const conversionCheck = await DatabaseService.canConvertUnits(ingredientWithUnits.default_unit_id, selectedUnit)
-      
-      if (!conversionCheck.canConvert) {
-        // Show conversion error modal
-        const ingredientDefaultUnit = ingredientWithUnits.default_unit_info
-        setConversionError({
-          ingredientName: ingredient.name,
-          fromUnit: ingredientDefaultUnit?.name || 'unidad desconocida',
-          toUnit: selectedUnitInfo.name,
-          errorMessage: conversionCheck.error || 'Conversión no válida',
-          fromCategory: ingredientDefaultUnit?.category?.name,
-          toCategory: selectedUnitInfo.category?.name
-        })
-        setShowConversionErrorModal(true)
-        return
-      }
-    }
+    // Since we now only show compatible units, no need for conversion validation
+
+    const totalPrice = Number.parseFloat(price)
+    const quantityValue = Number.parseFloat(quantity)
 
     const newItem: PurchaseItem = {
       id: Date.now().toString(),
@@ -148,9 +132,9 @@ export default function CreatePurchasePage() {
       unit: selectedUnitInfo.name,
       unitId: selectedUnitInfo.id,
       unitSymbol: selectedUnitInfo.symbol,
-      quantity: Number.parseFloat(quantity),
-      price: Number.parseFloat(price),
-      total: Number.parseFloat(quantity) * Number.parseFloat(price),
+      quantity: quantityValue,
+      price: totalPrice / quantityValue, // Precio unitario calculado
+      total: totalPrice, // El precio introducido es el total
     }
 
     setItems([...items, newItem])
@@ -171,6 +155,114 @@ export default function CreatePurchasePage() {
   const totalAmount = items.reduce((sum, item) => sum + item.total, 0)
   const totalItems = items.length
 
+  // Filter ingredients based on search term
+  const getFilteredIngredients = () => {
+    let filtered = []
+    
+    if (!ingredientSearchTerm.trim()) {
+      // Show only first 2 ingredients alphabetically when no search
+      filtered = ingredients.slice(0, 2)
+    } else {
+      // Filter ingredients that match the search term
+      filtered = ingredients.filter(ingredient =>
+        ingredient.name.toLowerCase().includes(ingredientSearchTerm.toLowerCase())
+      )
+    }
+    
+    // Always include the selected ingredient if it's not already in the filtered list
+    if (selectedIngredient) {
+      const selectedIngredientObj = ingredients.find(i => i.id === selectedIngredient)
+      if (selectedIngredientObj && !filtered.find(i => i.id === selectedIngredient)) {
+        filtered = [selectedIngredientObj, ...filtered]
+      }
+    }
+    
+    return filtered
+  }
+
+  const filteredIngredients = getFilteredIngredients()
+
+  // Get compatible units for selected ingredient
+  const getCompatibleUnits = () => {
+    if (!selectedIngredient) return []
+    
+    const ingredient = ingredients.find(i => i.id === selectedIngredient)
+    if (!ingredient) return []
+    
+    const ingredientUnitInfo = ingredient.unit_info || ingredient.default_unit_info
+    const ingredientUnitId = ingredient.unit_id || ingredient.default_unit_id
+
+    const baseUnit = units.find(unit => unit.id === ingredientUnitId)
+
+    if (!ingredientUnitInfo?.category_id) {
+      return baseUnit ? [baseUnit] : []
+    }
+
+    let compatible = units.filter(unit => unit.category_id === ingredientUnitInfo.category_id)
+
+    if (baseUnit) {
+      const exists = compatible.some(unit => unit.id === baseUnit.id)
+      if (!exists) {
+        compatible = [baseUnit, ...compatible]
+      } else {
+        // Move base unit to the front for prioridad
+        compatible = [baseUnit, ...compatible.filter(unit => unit.id !== baseUnit.id)]
+      }
+    }
+
+    if (compatible.length === 0 && baseUnit) {
+      return [baseUnit]
+    }
+
+    // Remove posibles duplicados conservando el orden
+    const uniqueById = new Map<string, Unit>()
+    compatible.forEach(unit => uniqueById.set(unit.id, unit))
+    return Array.from(uniqueById.values())
+  }
+
+  const compatibleUnits = getCompatibleUnits()
+
+  // Filter units based on search term
+  const getFilteredUnits = () => {
+    if (compatibleUnits.length === 0) return []
+
+    const matchesSearch = compatibleUnits.filter(unit =>
+      unit.name.toLowerCase().includes(unitSearchTerm.toLowerCase()) ||
+      unit.symbol.toLowerCase().includes(unitSearchTerm.toLowerCase())
+    )
+
+    if (unitSearchTerm.trim()) {
+      return matchesSearch
+    }
+
+    const baseList = compatibleUnits.slice(0, 5)
+    if (selectedUnit) {
+      const selectedInfo = compatibleUnits.find(unit => unit.id === selectedUnit)
+      if (selectedInfo && !baseList.some(unit => unit.id === selectedInfo.id)) {
+        baseList.unshift(selectedInfo)
+      }
+    }
+
+    // Eliminar duplicados manteniendo el orden
+    const uniqueById = new Map<string, Unit>()
+    baseList.forEach(unit => uniqueById.set(unit.id, unit))
+    return Array.from(uniqueById.values())
+  }
+
+  const filteredUnits = getFilteredUnits()
+
+  // Get dynamic placeholder for quantity field
+  const getQuantityPlaceholder = () => {
+    if (!selectedUnit) {
+      if (!selectedIngredient) return "Selecciona un ingrediente"
+      const ingredient = ingredients.find(i => i.id === selectedIngredient)
+      const unitInfo = ingredient?.unit_info || ingredient?.default_unit_info
+      return unitInfo ? `Introduce la cantidad (${unitInfo.symbol})` : "Introduce la cantidad"
+    }
+    const selectedUnitInfo = units.find(u => u.id === selectedUnit)
+    return selectedUnitInfo ? `Introduce la cantidad (${selectedUnitInfo.symbol})` : "Introduce la cantidad"
+  }
+
   const updateIngredientStock = async (item: PurchaseItem) => {
     try {
       const ingredient = ingredients.find(i => i.id === item.ingredientId)
@@ -187,13 +279,12 @@ export default function CreatePurchasePage() {
       console.log(`Updating ${ingredient.name}: Current stock: ${currentStock}, Adding: ${item.quantity} ${item.unitSymbol}`)
 
       // Convert quantity to ingredient's base unit if necessary
-      const ingredientWithUnits = ingredient as any
-      const ingredientBaseUnitId = ingredientWithUnits.unit_id || ingredientWithUnits.default_unit_id
+    const ingredientBaseUnitId = ingredient.unit_id || ingredient.default_unit_id
+    
+    if (ingredientBaseUnitId && item.unitId !== ingredientBaseUnitId) {
+      console.log(`Converting ${item.quantity} from unit ${item.unitId} to base unit ${ingredientBaseUnitId}`)
       
-      if (ingredientBaseUnitId && item.unitId !== ingredientBaseUnitId) {
-        console.log(`Converting ${item.quantity} from unit ${item.unitId} to base unit ${ingredientBaseUnitId}`)
-        
-        const conversion = await DatabaseService.convertUnits(item.quantity, item.unitId, ingredientBaseUnitId)
+      const conversion = await DatabaseService.convertUnits(item.quantity, item.unitId, ingredientBaseUnitId)
         
         if (conversion.success && conversion.convertedValue !== undefined) {
           quantityToAdd = conversion.convertedValue
@@ -260,7 +351,7 @@ export default function CreatePurchasePage() {
         status: status,
         notes: notes || undefined,
         items: items.map(item => ({
-          ingredient_id: item.ingredientId,
+          article_id: item.ingredientId,
           quantity: item.quantity,
           unit: item.unitId,
           unit_cost: item.price,
@@ -436,17 +527,47 @@ export default function CreatePurchasePage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <Label htmlFor="ingredient" className="text-sm font-medium">Ingrediente *</Label>
-                    <Select value={selectedIngredient} onValueChange={setSelectedIngredient}>
+                    
+                    {/* Select de ingredientes con búsqueda interna */}
+                    <Select value={selectedIngredient} onValueChange={(value) => {
+                      setSelectedIngredient(value)
+                      setIngredientSearchTerm("") // Limpiar búsqueda al seleccionar
+                    }}>
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Selecciona un ingrediente" />
+                        <SelectValue placeholder="Selecciona un ingrediente">
+                          {selectedIngredient && (() => {
+                            const ingredient = ingredients.find(i => i.id === selectedIngredient)
+                            return ingredient ? ingredient.name : "Selecciona un ingrediente"
+                          })()}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
+                        {/* Campo de búsqueda dentro del dropdown */}
+                        <div className="p-2 border-b">
+                          <div className="relative">
+                            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                              type="text"
+                              placeholder="Buscar ingrediente..."
+                              value={ingredientSearchTerm}
+                              onChange={(e) => {
+                                e.stopPropagation()
+                                setIngredientSearchTerm(e.target.value)
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full h-8 pl-8"
+                            />
+                          </div>
+                        </div>
+                        
                         {loading ? (
                           <div className="p-2 text-center text-muted-foreground">Cargando ingredientes...</div>
-                        ) : ingredients.length === 0 ? (
-                          <div className="p-2 text-center text-muted-foreground">No hay ingredientes disponibles</div>
+                        ) : filteredIngredients.length === 0 ? (
+                          <div className="p-2 text-center text-muted-foreground">
+                            {ingredientSearchTerm.trim() ? 'No se encontraron ingredientes' : 'No hay ingredientes disponibles'}
+                          </div>
                         ) : (
-                          ingredients.map((ingredient) => (
+                          filteredIngredients.map((ingredient) => (
                             <SelectItem key={ingredient.id} value={ingredient.id}>
                               <div className="flex flex-col">
                                 <span className="font-medium">{ingredient.name}</span>
@@ -458,54 +579,65 @@ export default function CreatePurchasePage() {
                             </SelectItem>
                           ))
                         )}
+                        
                       </SelectContent>
                     </Select>
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="unit" className="text-sm font-medium">Unidad *</Label>
-                    <Select value={selectedUnit} onValueChange={setSelectedUnit}>
+                    <Select value={selectedUnit} onValueChange={(value) => {
+                      setSelectedUnit(value)
+                      setUnitSearchTerm("") // Limpiar búsqueda al seleccionar
+                    }}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Selecciona la unidad" />
                       </SelectTrigger>
                       <SelectContent>
+                        {/* Campo de búsqueda dentro del dropdown */}
+                        <div className="p-2 border-b">
+                          <div className="relative">
+                            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                              type="text"
+                              placeholder="Buscar unidad..."
+                              value={unitSearchTerm}
+                              onChange={(e) => {
+                                e.stopPropagation()
+                                setUnitSearchTerm(e.target.value)
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full h-8 pl-8"
+                            />
+                          </div>
+                        </div>
+                        
                         {loading ? (
                           <SelectItem value="loading" disabled>
                             Cargando unidades...
                           </SelectItem>
-                        ) : units.length === 0 ? (
+                        ) : !selectedIngredient ? (
+                          <SelectItem value="no-ingredient" disabled>
+                            Primero selecciona un ingrediente
+                          </SelectItem>
+                        ) : filteredUnits.length === 0 ? (
                           <SelectItem value="no-units" disabled>
-                            No hay unidades disponibles
+                            {unitSearchTerm.trim() ? 'No se encontraron unidades' : 'No hay unidades compatibles'}
                           </SelectItem>
                         ) : (
-                          // Group units by category
-                          Object.entries(
-                            units.reduce((acc, unit) => {
-                              const categoryName = unit.category?.name || 'Sin categoría'
-                              if (!acc[categoryName]) acc[categoryName] = []
-                              acc[categoryName].push(unit)
-                              return acc
-                            }, {} as Record<string, Unit[]>)
-                          ).map(([categoryName, categoryUnits]) => (
-                            <div key={categoryName}>
-                              <div className="px-2 py-1 text-xs font-semibold text-gray-500 bg-gray-50">
-                                {categoryName}
+                          filteredUnits.map((unit) => (
+                            <SelectItem key={unit.id} value={unit.id}>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{unit.name}</span>
+                                <span className="text-xs text-muted-foreground">({unit.symbol})</span>
                               </div>
-                              {categoryUnits.map((unit) => (
-                                <SelectItem key={unit.id} value={unit.id}>
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-medium">{unit.name}</span>
-                                    <span className="text-xs text-muted-foreground">({unit.symbol})</span>
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </div>
+                            </SelectItem>
                           ))
                         )}
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
+                  </div>
 
                 {/* Segunda fila: Cantidad y Precio */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -516,7 +648,7 @@ export default function CreatePurchasePage() {
                       type="number"
                       step="0.01"
                       min="0"
-                      placeholder="Ejemplo: 10"
+                      placeholder={getQuantityPlaceholder()}
                       className="w-full"
                       value={quantity}
                       onChange={(e) => setQuantity(e.target.value)}
@@ -524,13 +656,13 @@ export default function CreatePurchasePage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="price" className="text-sm font-medium">Precio Unitario (€) *</Label>
+                    <Label htmlFor="price" className="text-sm font-medium">Precio Total (€) *</Label>
                     <Input
                       id="price"
                       type="number"
                       step="0.01"
                       min="0"
-                      placeholder="Ejemplo: 2.50"
+                      placeholder="Precio total por la cantidad"
                       className="w-full"
                       value={price}
                       onChange={(e) => setPrice(e.target.value)}
@@ -671,22 +803,6 @@ export default function CreatePurchasePage() {
         />
       )}
 
-      {/* Unit Conversion Error Modal */}
-      {conversionError && (
-        <UnitConversionErrorModal
-          isOpen={showConversionErrorModal}
-          onClose={() => {
-            setShowConversionErrorModal(false)
-            setConversionError(null)
-          }}
-          ingredientName={conversionError.ingredientName}
-          fromUnit={conversionError.fromUnit}
-          toUnit={conversionError.toUnit}
-          errorMessage={conversionError.errorMessage}
-          fromCategory={conversionError.fromCategory}
-          toCategory={conversionError.toCategory}
-        />
-      )}
     </div>
   )
 }

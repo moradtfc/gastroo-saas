@@ -36,23 +36,50 @@ export interface Unit {
   category?: Category
 }
 
-export interface Ingredient {
+export interface FoodCategory {
   id: string
   name: string
-  category?: string
+  description?: string
+  icon?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Allergen {
+  id: string
+  name: string
+  description?: string
+  severity_level: 'low' | 'medium' | 'high' | 'critical'
+  created_at: string
+  updated_at: string
+}
+
+export interface Article {
+  id: string
+  name: string
+  category?: string // Legacy field - will be deprecated
   unit: string // Legacy field - will be deprecated
   unit_id?: string
   default_unit_id?: string
+  food_category_id?: string // Added
+  sku?: string // Added
+  image_url?: string // Optional image URL (limited to 1 per article)
+  image_updated_at?: string // Timestamp of last image update
   cost_per_unit?: number
   current_stock?: number
   min_stock?: number
-  allergens?: string[]
+  allergens?: string[] // Legacy field - will be deprecated
   supplier_id?: string
   created_at: string
   updated_at: string
   unit_info?: Unit
   default_unit_info?: Unit
+  food_category?: FoodCategory // Joined food category info
+  article_allergens?: Array<{allergen: Allergen}> // Joined allergens
 }
+
+// Legacy alias for backwards compatibility
+export type Ingredient = Article
 
 export interface Recipe {
   id: string
@@ -120,6 +147,111 @@ export class DatabaseService {
     if (error) throw error
     return data as Unit[]
   }
+
+  // Food Categories methods
+  static async getFoodCategories() {
+    const { data, error } = await supabase
+      .from('food_categories')
+      .select('*')
+      .order('name')
+    
+    if (error) throw error
+    return data as FoodCategory[]
+  }
+
+  static async createFoodCategory(category: Omit<FoodCategory, 'id' | 'created_at' | 'updated_at'>) {
+    const { data, error } = await supabase
+      .from('food_categories')
+      .insert(category)
+      .select()
+      .single()
+    
+    if (error) throw error
+    return data as FoodCategory
+  }
+
+  // Allergens methods
+  static async getAllergens() {
+    const { data, error } = await supabase
+      .from('allergens')
+      .select('*')
+      .order('name')
+    
+    if (error) throw error
+    return data as Allergen[]
+  }
+
+  static async createAllergen(allergen: Omit<Allergen, 'id' | 'created_at' | 'updated_at'>) {
+    const { data, error } = await supabase
+      .from('allergens')
+      .insert(allergen)
+      .select()
+      .single()
+    
+    if (error) throw error
+    return data as Allergen
+  }
+
+  // Article-Allergen relationship methods
+  static async addAllergenToArticle(articleId: string, allergenId: string) {
+    const { data, error } = await supabase
+      .from('article_allergens')
+      .insert({
+        article_id: articleId,
+        allergen_id: allergenId
+      })
+      .select()
+      .single()
+    
+    if (error) throw error
+    return data
+  }
+
+  static async updateArticleAllergens(articleId: string, allergenIds: string[]) {
+    const { error } = await supabase
+      .from('article_allergens')
+      .delete()
+      .eq('article_id', articleId)
+
+    if (error) throw error
+
+    if (allergenIds.length === 0) return
+
+    const { error: insertError } = await supabase
+      .from('article_allergens')
+      .insert(allergenIds.map((allergenId) => ({ article_id: articleId, allergen_id: allergenId })))
+
+    if (insertError) throw insertError
+  }
+
+  static async removeAllergenFromArticle(articleId: string, allergenId: string) {
+    const { error } = await supabase
+      .from('article_allergens')
+      .delete()
+      .eq('article_id', articleId)
+      .eq('allergen_id', allergenId)
+    
+    if (error) throw error
+  }
+
+  static async getArticleAllergens(articleId: string) {
+    const { data, error } = await supabase
+      .from('article_allergens')
+      .select(`
+        *,
+        allergen:allergens(*)
+      `)
+      .eq('article_id', articleId)
+    
+    if (error) throw error
+    return data
+  }
+
+  // Legacy aliases for backwards compatibility
+  static addAllergenToIngredient = this.addAllergenToArticle
+  static updateIngredientAllergens = this.updateArticleAllergens
+  static removeAllergenFromIngredient = this.removeAllergenFromArticle
+  static getIngredientAllergens = this.getArticleAllergens
 
   static async canConvertUnits(fromUnitId: string, toUnitId: string): Promise<{canConvert: boolean, error?: string}> {
     try {
@@ -287,9 +419,9 @@ export class DatabaseService {
 
       // Update inventory by subtracting the purchased quantities
       for (const item of purchase.purchase_items || []) {
-        if (item.ingredients?.id) {
-          await this.subtractFromIngredientStock(
-            item.ingredients.id,
+        if (item.articles?.id) {
+          await this.subtractFromArticleStock(
+            item.articles.id,
             item.quantity,
             item.unit_info?.id || item.unit
           )
@@ -336,50 +468,53 @@ export class DatabaseService {
     }
   }
 
-  static async subtractFromIngredientStock(ingredientId: string, quantity: number, unitId: string) {
+  static async subtractFromArticleStock(articleId: string, quantity: number, unitId: string) {
     try {
-      // Get current ingredient data
-      const { data: ingredient, error: getError } = await supabase
-        .from('ingredients')
+      // Get current article data
+      const { data: article, error: getError } = await supabase
+        .from('articles')
         .select('current_stock, cost_per_unit, unit_id, default_unit_id')
-        .eq('id', ingredientId)
+        .eq('id', articleId)
         .single()
 
       if (getError) throw getError
 
-      if (!ingredient) {
-        throw new Error('Ingrediente no encontrado')
+      if (!article) {
+        throw new Error('Artículo no encontrado')
       }
 
-      // Convert quantity to ingredient's base unit if necessary
+      // Convert quantity to article's base unit if necessary
       let quantityToSubtract = quantity
-      if (unitId !== ingredient.unit_id && unitId !== ingredient.default_unit_id) {
-        const conversion = await this.convertUnits(quantity, unitId, ingredient.unit_id || ingredient.default_unit_id)
+      if (unitId !== article.unit_id && unitId !== article.default_unit_id) {
+        const conversion = await this.convertUnits(quantity, unitId, article.unit_id || article.default_unit_id)
         if (!conversion.success) {
-          console.warn(`Cannot convert units for ingredient ${ingredientId}, using original quantity`)
+          console.warn(`Cannot convert units for article ${articleId}, using original quantity`)
         } else {
           quantityToSubtract = conversion.convertedValue || quantity
         }
       }
 
-      const newStock = Math.max(0, (ingredient.current_stock || 0) - quantityToSubtract)
+      const newStock = Math.max(0, (article.current_stock || 0) - quantityToSubtract)
 
-      // Update ingredient stock
+      // Update article stock
       const { error: updateError } = await supabase
-        .from('ingredients')
+        .from('articles')
         .update({ current_stock: newStock })
-        .eq('id', ingredientId)
+        .eq('id', articleId)
 
       if (updateError) throw updateError
 
-      console.log(`Updated ingredient ${ingredientId}: ${ingredient.current_stock} - ${quantityToSubtract} = ${newStock}`)
+      console.log(`Updated article ${articleId}: ${article.current_stock} - ${quantityToSubtract} = ${newStock}`)
       
       return { success: true, newStock }
     } catch (error: any) {
-      console.error('Error subtracting from ingredient stock:', error)
+      console.error('Error subtracting from article stock:', error)
       throw error
     }
   }
+
+  // Legacy alias
+  static subtractFromIngredientStock = this.subtractFromArticleStock
 
   static async createSupplier(supplier: Omit<Supplier, 'id' | 'created_at' | 'updated_at'>) {
     const { data, error } = await supabase
@@ -392,14 +527,44 @@ export class DatabaseService {
     return data as Supplier
   }
 
-  // Ingredients
-  static async getIngredients() {
+  // Articles (Inventory items)
+  static async getArticles() {
     const { data, error } = await supabase
-      .from('ingredients')
+      .from('articles')
       .select(`
         *,
         suppliers (
           name
+        ),
+        food_category:food_categories(
+          id,
+          name,
+          description,
+          icon
+        ),
+        unit_info:units!articles_unit_id_fkey(
+          id,
+          name,
+          symbol,
+          category_id,
+          base_unit,
+          category:categories(id, name)
+        ),
+        default_unit_info:units!articles_default_unit_id_fkey(
+          id,
+          name,
+          symbol,
+          category_id,
+          base_unit,
+          category:categories(id, name)
+        ),
+        article_allergens(
+          allergen:allergens(
+            id,
+            name,
+            description,
+            severity_level
+          )
         )
       `)
       .order('name')
@@ -408,28 +573,33 @@ export class DatabaseService {
     return data
   }
 
-  static async createIngredient(ingredient: Omit<Ingredient, 'id' | 'created_at' | 'updated_at'>) {
+  static async createArticle(article: Omit<Article, 'id' | 'created_at' | 'updated_at'>) {
     const { data, error } = await supabase
-      .from('ingredients')
-      .insert(ingredient)
+      .from('articles')
+      .insert(article)
       .select()
       .single()
     
     if (error) throw error
-    return data as Ingredient
+    return data as Article
   }
 
-  static async updateIngredient(id: string, updates: Partial<Omit<Ingredient, 'id' | 'created_at' | 'updated_at'>>) {
+  static async updateArticle(id: string, updates: Partial<Omit<Article, 'id' | 'created_at' | 'updated_at'>>) {
     const { data, error } = await supabase
-      .from('ingredients')
+      .from('articles')
       .update(updates)
       .eq('id', id)
       .select()
       .single()
     
     if (error) throw error
-    return data as Ingredient
+    return data as Article
   }
+
+  // Legacy aliases for backwards compatibility
+  static getIngredients = this.getArticles
+  static createIngredient = this.createArticle
+  static updateIngredient = this.updateArticle
 
   // Recipes
   static async getRecipes() {
@@ -442,7 +612,7 @@ export class DatabaseService {
           quantity,
           unit,
           cost,
-          ingredients (
+          articles (
             name,
             unit
           )
@@ -455,7 +625,7 @@ export class DatabaseService {
   }
 
   static async getRecipe(id: string) {
-    const { data, error } = await supabase
+    const { data, error} = await supabase
       .from('recipes')
       .select(`
         *,
@@ -464,7 +634,7 @@ export class DatabaseService {
           quantity,
           unit,
           cost,
-          ingredients (
+          articles (
             name,
             unit,
             cost_per_unit
@@ -555,7 +725,7 @@ export class DatabaseService {
           unit,
           unit_cost,
           total_cost,
-          ingredients (
+          articles (
             name,
             unit
           )
@@ -585,7 +755,7 @@ export class DatabaseService {
           unit,
           unit_cost,
           total_cost,
-          ingredients (
+          articles (
             id,
             name,
             unit,
@@ -613,7 +783,8 @@ export class DatabaseService {
     status?: string
     notes?: string
     items: Array<{
-      ingredient_id: string
+      article_id?: string
+      ingredient_id?: string // Legacy field for backwards compatibility
       quantity: number
       unit: string
       unit_cost: number
@@ -636,16 +807,17 @@ export class DatabaseService {
         throw new Error('El monto total debe ser mayor a 0')
       }
 
-      // Validate all ingredients exist
+      // Validate all articles exist
       for (const item of purchaseData.items) {
-        const { data: ingredient, error } = await supabase
-          .from('ingredients')
+        const articleId = item.article_id || item.ingredient_id // Support legacy field
+        const { data: article, error } = await supabase
+          .from('articles')
           .select('id')
-          .eq('id', item.ingredient_id)
+          .eq('id', articleId)
           .single()
         
-        if (error || !ingredient) {
-          throw new Error(`Ingrediente con ID ${item.ingredient_id} no existe`)
+        if (error || !article) {
+          throw new Error(`Artículo con ID ${articleId} no existe`)
         }
       }
 
@@ -683,9 +855,9 @@ export class DatabaseService {
       // Create purchase items
       const purchaseItems = purchaseData.items.map(item => ({
         purchase_id: purchase.id,
-        ingredient_id: item.ingredient_id,
+        article_id: item.article_id || item.ingredient_id, // Support legacy field
         quantity: item.quantity,
-        unit: item.unit,
+        unit_id: item.unit, // Guardar en unit_id para el JOIN
         unit_cost: item.unit_cost,
         total_cost: item.total_cost
       }))
