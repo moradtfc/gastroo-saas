@@ -42,7 +42,7 @@ export default function RecipeDetailPage({ params }: RecipeDetailPageProps) {
             quantity,
             unit,
             cost,
-            ingredients (
+            articles (
               id,
               name,
               unit,
@@ -236,7 +236,7 @@ export default function RecipeDetailPage({ params }: RecipeDetailPageProps) {
                     {recipe.recipe_ingredients.map((ri: any) => (
                       <TableRow key={ri.id}>
                         <TableCell className="font-medium">
-                          {ri.ingredients?.name || 'Ingrediente desconocido'}
+                          {ri.articles?.name || 'Ingrediente desconocido'}
                         </TableCell>
                         <TableCell className="text-right">
                           {ri.quantity} {ri.unit}

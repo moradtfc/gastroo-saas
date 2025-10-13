@@ -448,14 +448,14 @@ export default function NewIngredientPage() {
             <div>
               <h4 className="font-semibold mb-4">Imagen</h4>
               <label htmlFor="image-upload" className="block">
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-10 text-center hover:border-blue-500 hover:bg-gray-50 cursor-pointer transition-all">
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-10 text-center hover:border-blue-500 hover:bg-gray-50 cursor-pointer transition-all">
                   {uploadedImage ? (
                     <img src={uploadedImage} alt="Preview" className="max-h-40 mx-auto rounded-lg" />
                   ) : (
                     <>
                       <Upload className="w-10 h-10 mx-auto mb-3 text-gray-400" />
-                      <div className="text-sm text-gray-600">
-                        Arrastra y suelta las imágenes aquí,<br />
+                <div className="text-sm text-gray-600">
+                  Arrastra y suelta las imágenes aquí,<br />
                         <span className="text-blue-600 font-semibold hover:underline">haz clic para subir</span>
                       </div>
                     </>
@@ -662,8 +662,8 @@ export default function NewIngredientPage() {
                     ) : (
                       <>
                         <Upload className="w-10 h-10 mx-auto mb-2 text-gray-400" />
-                        <div className="text-sm text-gray-600">
-                          Arrastra y suelta las imágenes aquí,{" "}
+                  <div className="text-sm text-gray-600">
+                    Arrastra y suelta las imágenes aquí,{" "}
                           <span className="text-blue-600 font-semibold hover:underline">
                             súbelas haciendo clic
                           </span>
@@ -750,14 +750,14 @@ export default function NewIngredientPage() {
                           )}
                           onClick={() => handleCategorySelect(category.id)}
                         >
-                          <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2">
                             <span className="text-xl">{category.icon}</span>
                             <span className="font-medium">{category.name}</span>
                           </div>
                           {category.description && (
                             <p className="text-xs text-gray-500 mt-1 ml-7">{category.description}</p>
                           )}
-                        </div>
+                              </div>
                       ))}
                     </div>
 
@@ -795,7 +795,7 @@ export default function NewIngredientPage() {
                       <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <div>
+                  <div>
                               <p className="font-semibold text-blue-900">{selectedUnit.name}</p>
                               <p className="text-xs text-blue-700">Símbolo: {selectedUnit.symbol}</p>
                             </div>
@@ -914,7 +914,7 @@ export default function NewIngredientPage() {
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-2">Stock actual</label>
                     <div className="flex gap-2 items-center">
-                      <Input
+                    <Input
                         type="text"
                         inputMode="decimal"
                         placeholder="0"
@@ -941,8 +941,8 @@ export default function NewIngredientPage() {
                         isLowStockAlertEnabled ? "bg-blue-100" : "bg-gray-200"
                       )}>
                         <span className="text-lg">{isLowStockAlertEnabled ? "🔔" : "🔕"}</span>
-                      </div>
-                      <div>
+                  </div>
+                  <div>
                         <label htmlFor="low-stock-alert" className="block text-sm font-semibold text-gray-900 cursor-pointer">
                           Configurar alerta por Stock bajo
                         </label>
@@ -980,9 +980,9 @@ export default function NewIngredientPage() {
                         />
                         <div className="px-4 py-3 bg-white border border-blue-200 rounded-lg text-blue-900 font-semibold min-w-[80px] text-center">
                           {selectedUnit ? selectedUnit.symbol : 'unidad'}
-                        </div>
-                      </div>
-                    </div>
+                  </div>
+                </div>
+                  </div>
                   )}
                 </div>
               </section>
@@ -1059,8 +1059,8 @@ export default function NewIngredientPage() {
                 {/* Proveedor seleccionado */}
                 {selectedSupplier && (
                   <div className="p-4 border border-gray-200 rounded-lg bg-gray-50">
-                    <div className="flex items-start justify-between">
-                      <div>
+                <div className="flex items-start justify-between">
+                              <div>
                         <p className="font-semibold text-gray-900">{selectedSupplier.name}</p>
                         {selectedSupplier.category && (
                           <p className="text-sm text-gray-600 mt-1">{selectedSupplier.category}</p>
@@ -1089,7 +1089,7 @@ export default function NewIngredientPage() {
                 {!selectedSupplier && (
                   <div className="p-4 border border-dashed border-gray-300 rounded-lg text-center text-sm text-gray-500">
                     No hay proveedor seleccionado
-                  </div>
+            </div>
                 )}
               </section>
 

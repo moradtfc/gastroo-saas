@@ -246,8 +246,8 @@ export default function EditRecipePage({ params }: EditRecipePageProps) {
           }
           
           // If quantity is changed, recalculate cost
-          if (field === 'quantity' && updated.ingredients?.cost_per_unit) {
-            updated.cost = (parseFloat(value.toString()) || 0) * updated.ingredients.cost_per_unit
+          if (field === 'quantity' && updated.articles?.cost_per_unit) {
+            updated.cost = (parseFloat(value.toString()) || 0) * updated.articles.cost_per_unit
           }
           
           return updated

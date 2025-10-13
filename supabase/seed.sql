@@ -5,18 +5,18 @@ INSERT INTO suppliers (name, address, phone, email, category, contact_person) VA
 ('Pescados del Mar', 'Puerto de Valencia, Muelle 7', '+34 96 345 6789', 'ventas@pescadosdelmar.es', 'Pescados y Mariscos', 'Pedro Martín'),
 ('Lácteos Frescos SL', 'Polígono Industrial Norte 12', '+34 96 456 7890', 'comercial@lacteosfresco.es', 'Lácteos', 'Ana Ruiz');
 
--- Insert sample articles (inventory items)
-INSERT INTO articles (name, category, unit, cost_per_unit, current_stock, min_stock, supplier_id) VALUES
-('Tomate', 'Verduras', 'kg', 2.50, 25.0, 5.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
-('Lechuga', 'Verduras', 'kg', 1.80, 15.0, 3.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
-('Cebolla', 'Verduras', 'kg', 1.20, 30.0, 10.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
-('Pimiento Rojo', 'Verduras', 'kg', 3.20, 18.0, 5.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
-('Pollo', 'Carnes', 'kg', 8.50, 20.0, 5.0, (SELECT id FROM suppliers WHERE name = 'Carnicería Premium')),
-('Ternera', 'Carnes', 'kg', 15.20, 12.0, 3.0, (SELECT id FROM suppliers WHERE name = 'Carnicería Premium')),
-('Salmón', 'Pescados', 'kg', 18.90, 8.0, 2.0, (SELECT id FROM suppliers WHERE name = 'Pescados del Mar')),
-('Queso Manchego', 'Lácteos', 'kg', 12.50, 5.0, 2.0, (SELECT id FROM suppliers WHERE name = 'Lácteos Frescos SL')),
-('Aceite de Oliva', 'Aceites y Condimentos', 'L', 8.90, 10.0, 3.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
-('Arroz Bomba', 'Cereales y Legumbres', 'kg', 4.50, 15.0, 5.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia'));
+-- Insert sample articles (inventory items) con unit_id
+INSERT INTO articles (name, category, unit, unit_id, default_unit_id, cost_per_unit, current_stock, min_stock, supplier_id) VALUES
+('Tomate', 'Verduras', 'kg', (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), 2.50, 25.0, 5.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
+('Lechuga', 'Verduras', 'kg', (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), 1.80, 15.0, 3.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
+('Cebolla', 'Verduras', 'kg', (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), 1.20, 30.0, 10.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
+('Pimiento Rojo', 'Verduras', 'kg', (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), 3.20, 18.0, 5.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
+('Pollo', 'Carnes', 'kg', (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), 8.50, 20.0, 5.0, (SELECT id FROM suppliers WHERE name = 'Carnicería Premium')),
+('Ternera', 'Carnes', 'kg', (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), 15.20, 12.0, 3.0, (SELECT id FROM suppliers WHERE name = 'Carnicería Premium')),
+('Salmón', 'Pescados', 'kg', (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), 18.90, 8.0, 2.0, (SELECT id FROM suppliers WHERE name = 'Pescados del Mar')),
+('Queso Manchego', 'Lácteos', 'kg', (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), 12.50, 5.0, 2.0, (SELECT id FROM suppliers WHERE name = 'Lácteos Frescos SL')),
+('Aceite de Oliva', 'Aceites y Condimentos', 'L', (SELECT id FROM units WHERE symbol = 'L' LIMIT 1), (SELECT id FROM units WHERE symbol = 'L' LIMIT 1), 8.90, 10.0, 3.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia')),
+('Arroz Bomba', 'Cereales y Legumbres', 'kg', (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), (SELECT id FROM units WHERE symbol = 'kg' LIMIT 1), 4.50, 15.0, 5.0, (SELECT id FROM suppliers WHERE name = 'Mercado Central Valencia'));
 
 -- Insert sample recipes
 INSERT INTO recipes (name, description, category, servings, cooking_time, difficulty, sale_price, instructions) VALUES
@@ -39,24 +39,24 @@ INSERT INTO recipes (name, description, category, servings, cooking_time, diffic
 3. Cocinar 4 minutos por lado
 4. Servir con verduras');
 
--- Insert recipe ingredients (using article_id now)
-INSERT INTO recipe_ingredients (recipe_id, article_id, quantity, unit, cost) VALUES
+-- Insert recipe ingredients (usando article_id y unit_id)
+INSERT INTO recipe_ingredients (recipe_id, article_id, quantity, unit, unit_id, cost) VALUES
 -- Paella Valenciana
-((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Arroz Bomba'), 320, 'g', 1.44),
-((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Pollo'), 800, 'g', 6.80),
-((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Tomate'), 150, 'g', 0.38),
-((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Pimiento Rojo'), 100, 'g', 0.32),
-((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Aceite de Oliva'), 50, 'ml', 0.45),
+((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Arroz Bomba'), 320, 'g', (SELECT id FROM units WHERE symbol = 'g' LIMIT 1), 1.44),
+((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Pollo'), 800, 'g', (SELECT id FROM units WHERE symbol = 'g' LIMIT 1), 6.80),
+((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Tomate'), 150, 'g', (SELECT id FROM units WHERE symbol = 'g' LIMIT 1), 0.38),
+((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Pimiento Rojo'), 100, 'g', (SELECT id FROM units WHERE symbol = 'g' LIMIT 1), 0.32),
+((SELECT id FROM recipes WHERE name = 'Paella Valenciana'), (SELECT id FROM articles WHERE name = 'Aceite de Oliva'), 50, 'ml', (SELECT id FROM units WHERE symbol = 'ml' LIMIT 1), 0.45),
 
 -- Ensalada Mediterránea
-((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Lechuga'), 200, 'g', 0.36),
-((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Tomate'), 150, 'g', 0.38),
-((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Cebolla'), 50, 'g', 0.06),
-((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Aceite de Oliva'), 30, 'ml', 0.27),
+((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Lechuga'), 200, 'g', (SELECT id FROM units WHERE symbol = 'g' LIMIT 1), 0.36),
+((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Tomate'), 150, 'g', (SELECT id FROM units WHERE symbol = 'g' LIMIT 1), 0.38),
+((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Cebolla'), 50, 'g', (SELECT id FROM units WHERE symbol = 'g' LIMIT 1), 0.06),
+((SELECT id FROM recipes WHERE name = 'Ensalada Mediterránea'), (SELECT id FROM articles WHERE name = 'Aceite de Oliva'), 30, 'ml', (SELECT id FROM units WHERE symbol = 'ml' LIMIT 1), 0.27),
 
 -- Salmón a la Plancha
-((SELECT id FROM recipes WHERE name = 'Salmón a la Plancha'), (SELECT id FROM articles WHERE name = 'Salmón'), 200, 'g', 3.78),
-((SELECT id FROM recipes WHERE name = 'Salmón a la Plancha'), (SELECT id FROM articles WHERE name = 'Aceite de Oliva'), 20, 'ml', 0.18);
+((SELECT id FROM recipes WHERE name = 'Salmón a la Plancha'), (SELECT id FROM articles WHERE name = 'Salmón'), 200, 'g', (SELECT id FROM units WHERE symbol = 'g' LIMIT 1), 3.78),
+((SELECT id FROM recipes WHERE name = 'Salmón a la Plancha'), (SELECT id FROM articles WHERE name = 'Aceite de Oliva'), 20, 'ml', (SELECT id FROM units WHERE symbol = 'ml' LIMIT 1), 0.18);
 
 -- Insert sample menus
 INSERT INTO menus (name, description, category, status) VALUES

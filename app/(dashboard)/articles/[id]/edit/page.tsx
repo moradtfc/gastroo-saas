@@ -394,7 +394,7 @@ export default function EditArticlePage({ params }: EditArticlePageProps) {
               <div className="grid grid-cols-2 gap-3">
                 {allergens.map((allergen) => {
                   const isSelected = selectedAllergens.some(a => a.id === allergen.id)
-                  return (
+    return (
                     <div
                       key={allergen.id}
                       className={cn(
@@ -638,7 +638,7 @@ export default function EditArticlePage({ params }: EditArticlePageProps) {
                 >
                   Editar artículo
                 </h2>
-              </div>
+        </div>
               <div className="flex-1 flex justify-end">
                 <Button
                   onClick={handleSubmit}
@@ -676,12 +676,12 @@ export default function EditArticlePage({ params }: EditArticlePageProps) {
                 {/* Nombre y descripción con imagen */}
                 <div className="flex gap-4 mb-4">
                   <div className="flex-1 space-y-4">
-                    <Input
+                      <Input
                       placeholder="Nombre"
-                      value={formData.name}
-                      onChange={(e) => handleInputChange("name", e.target.value)}
+                        value={formData.name}
+                        onChange={(e) => handleInputChange("name", e.target.value)}
                       className="h-12 text-base border border-gray-300 rounded-lg"
-                      required
+                        required
                     />
                     <Textarea
                       placeholder="Descripción"
@@ -1104,7 +1104,7 @@ export default function EditArticlePage({ params }: EditArticlePageProps) {
                 ) : (
                   <div className="p-4 border border-dashed border-gray-300 rounded-lg text-center text-sm text-gray-500">
                     No hay alérgenos añadidos
-                  </div>
+            </div>
                 )}
               </section>
 
@@ -1114,14 +1114,14 @@ export default function EditArticlePage({ params }: EditArticlePageProps) {
               <section>
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="text-xl font-semibold">Proveedores</h2>
-                  <Button 
+                    <Button
                     type="button" 
                     variant="outline" 
                     className="bg-gray-100 hover:bg-gray-200 border border-gray-300"
                     onClick={() => setIsSupplierModalOpen(true)}
                   >
                     Añadir
-                  </Button>
+                    </Button>
                 </div>
                 
                 <p className="text-sm text-gray-600 mb-4">
@@ -1155,13 +1155,13 @@ export default function EditArticlePage({ params }: EditArticlePageProps) {
                         Quitar
                       </Button>
                     </div>
-                  </div>
+                    </div>
                 )}
 
                 {!selectedSupplier && (
                   <div className="p-4 border border-dashed border-gray-300 rounded-lg text-center text-sm text-gray-500">
                     No hay proveedor seleccionado
-                  </div>
+              </div>
                 )}
               </section>
 

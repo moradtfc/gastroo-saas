@@ -41,15 +41,20 @@ export default function ArticlesPage() {
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
   const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null)
   const [sortBy, setSortBy] = useState<"price" | "name" | "stock" | null>(null)
-  const [showQuickCreate, setShowQuickCreate] = useState(false)
+  const [openSortMenu, setOpenSortMenu] = useState(false)
+  const [isQuickCreateModalOpen, setIsQuickCreateModalOpen] = useState(false)
   const [quickCreateData, setQuickCreateData] = useState({
     name: "",
     categoryId: "",
+    unitId: "",
     costPerUnit: "",
     currentStock: ""
   })
+  const [categorySearch, setCategorySearch] = useState("")
+  const [unitSearch, setUnitSearch] = useState("")
   const menuRef = useRef<HTMLDivElement>(null)
   const actionsMenuRef = useRef<HTMLDivElement>(null)
+  const sortMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadArticles()
@@ -64,6 +69,9 @@ export default function ArticlesPage() {
       }
       if (actionsMenuRef.current && !actionsMenuRef.current.contains(event.target as Node)) {
         setOpenActionsMenu(false)
+      }
+      if (sortMenuRef.current && !sortMenuRef.current.contains(event.target as Node)) {
+        setOpenSortMenu(false)
       }
     }
 
@@ -144,6 +152,10 @@ export default function ArticlesPage() {
       toast.error("La categoría es obligatoria")
       return
     }
+    if (!quickCreateData.unitId) {
+      toast.error("La unidad es obligatoria")
+      return
+    }
     if (!quickCreateData.costPerUnit || parseFloat(quickCreateData.costPerUnit) <= 0) {
       toast.error("El precio es obligatorio y debe ser mayor a 0")
       return
@@ -154,36 +166,69 @@ export default function ArticlesPage() {
     }
 
     try {
-      // Obtener la primera unidad disponible como predeterminada
-      const defaultUnit = units[0]
-      if (!defaultUnit) {
-        toast.error("No hay unidades disponibles")
-        return
-      }
-
       const selectedCategory = foodCategories.find(c => c.id === quickCreateData.categoryId)
+      const selectedUnit = units.find(u => u.id === quickCreateData.unitId)
 
       const articleData: any = {
         name: quickCreateData.name,
         food_category_id: quickCreateData.categoryId,
-        unit_id: defaultUnit.id,
-        default_unit_id: defaultUnit.id,
+        unit_id: quickCreateData.unitId,
+        default_unit_id: quickCreateData.unitId,
         cost_per_unit: parseFloat(quickCreateData.costPerUnit),
         current_stock: parseFloat(quickCreateData.currentStock),
         category: selectedCategory?.name || undefined,
-        unit: defaultUnit.symbol || defaultUnit.name
+        unit: selectedUnit?.symbol || selectedUnit?.name || undefined
       }
 
       await DatabaseService.createIngredient(articleData)
       toast.success("Artículo creado exitosamente")
-      setShowQuickCreate(false)
-      setQuickCreateData({ name: "", categoryId: "", costPerUnit: "", currentStock: "" })
+      setIsQuickCreateModalOpen(false)
+      setQuickCreateData({ name: "", categoryId: "", unitId: "", costPerUnit: "", currentStock: "" })
+      setCategorySearch("")
+      setUnitSearch("")
       loadArticles()
     } catch (error) {
       console.error("Error creando artículo:", error)
       toast.error("Error al crear artículo")
     }
   }
+
+  const handleSortSelection = (type: "price" | "name" | "stock") => {
+    if (sortBy === type) {
+      if (sortOrder === "asc") {
+        setSortOrder("desc")
+      } else if (sortOrder === "desc") {
+        setSortBy(null)
+        setSortOrder(null)
+      }
+    } else {
+      setSortBy(type)
+      setSortOrder("asc")
+    }
+    setOpenSortMenu(false)
+  }
+
+  const getSortLabel = () => {
+    if (!sortBy) return "Ordenar por"
+    
+    if (sortBy === "price") {
+      return sortOrder === "asc" ? "Precio: Menor a Mayor" : "Precio: Mayor a Menor"
+    } else if (sortBy === "name") {
+      return sortOrder === "asc" ? "A-Z" : "Z-A"
+    } else if (sortBy === "stock") {
+      return sortOrder === "asc" ? "Stock: Menor a Mayor" : "Stock: Mayor a Menor"
+    }
+    return "Ordenar por"
+  }
+
+  const filteredCategoriesForQuickCreate = foodCategories.filter(cat =>
+    cat.name.toLowerCase().includes(categorySearch.toLowerCase())
+  )
+
+  const filteredUnitsForQuickCreate = units.filter(unit =>
+    unit.name.toLowerCase().includes(unitSearch.toLowerCase()) ||
+    unit.symbol.toLowerCase().includes(unitSearch.toLowerCase())
+  )
 
   const toggleSelectAll = () => {
     if (selectedItems.length === filteredArticles.length) {
@@ -375,8 +420,172 @@ export default function ArticlesPage() {
 
   return (
     <>
-      {/* Modal de selección de categorías */}
-      <Dialog open={isCategoryModalOpen} onOpenChange={setIsCategoryModalOpen}>
+    {/* Modal de creación rápida */}
+    <Dialog open={isQuickCreateModalOpen} onOpenChange={setIsQuickCreateModalOpen}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-xl">Crear artículo rápidamente</DialogTitle>
+        </DialogHeader>
+        
+        <div className="space-y-4">
+          {/* Nombre */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Nombre del artículo <span className="text-red-500">*</span>
+            </label>
+            <Input
+              placeholder="Ej: Tomate cherry"
+              value={quickCreateData.name}
+              onChange={(e) => setQuickCreateData(prev => ({ ...prev, name: e.target.value }))}
+            />
+          </div>
+
+          {/* Categoría */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Categoría <span className="text-red-500">*</span>
+            </label>
+            <Input
+              placeholder="Buscar categoría..."
+              value={categorySearch}
+              onChange={(e) => setCategorySearch(e.target.value)}
+              className="mb-2"
+            />
+            <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
+              {categorySearch === "" || filteredCategoriesForQuickCreate.length > 0 ? (
+                (categorySearch === "" ? foodCategories : filteredCategoriesForQuickCreate).map((cat) => (
+                  <div
+                    key={cat.id}
+                    onClick={() => {
+                      setQuickCreateData(prev => ({ ...prev, categoryId: cat.id }))
+                      setCategorySearch("")
+                    }}
+                    className={cn(
+                      "px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors flex items-center gap-2",
+                      quickCreateData.categoryId === cat.id && "bg-blue-50 border-l-4 border-blue-600"
+                    )}
+                  >
+                    <span>{cat.icon || "📁"}</span>
+                    <span className="text-gray-900">{cat.name}</span>
+                    {quickCreateData.categoryId === cat.id && (
+                      <span className="ml-auto text-blue-600">✓</span>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className="px-4 py-3 text-gray-500 text-sm">No se encontraron categorías</div>
+              )}
+        </div>
+      </div>
+
+          {/* Unidad */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Unidad <span className="text-red-500">*</span>
+            </label>
+            <Input
+              placeholder="Buscar unidad..."
+              value={unitSearch}
+              onChange={(e) => setUnitSearch(e.target.value)}
+              className="mb-2"
+            />
+            <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
+              {unitSearch === "" || filteredUnitsForQuickCreate.length > 0 ? (
+                (unitSearch === "" ? units : filteredUnitsForQuickCreate).map((unit) => (
+                  <div
+                    key={unit.id}
+                    onClick={() => {
+                      setQuickCreateData(prev => ({ ...prev, unitId: unit.id }))
+                      setUnitSearch("")
+                    }}
+                    className={cn(
+                      "px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors",
+                      quickCreateData.unitId === unit.id && "bg-blue-50 border-l-4 border-blue-600"
+                    )}
+                  >
+                    <span className="text-gray-900">{unit.name}</span>
+                    <span className="text-gray-500 text-sm ml-2">({unit.symbol})</span>
+                    {quickCreateData.unitId === unit.id && (
+                      <span className="ml-2 text-blue-600">✓</span>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className="px-4 py-3 text-gray-500 text-sm">No se encontraron unidades</div>
+              )}
+            </div>
+      </div>
+
+          {/* Precio y Stock en una fila */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Precio (€) <span className="text-red-500">*</span>
+              </label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={quickCreateData.costPerUnit}
+                onChange={(e) => {
+                  const sanitized = e.target.value.replace(/[^0-9.]/g, '')
+                  setQuickCreateData(prev => ({ ...prev, costPerUnit: sanitized }))
+                }}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Stock actual <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={quickCreateData.unitId 
+                    ? `Ej: 10 ${units.find(u => u.id === quickCreateData.unitId)?.symbol || ''}`
+                    : "0"
+                  }
+                  value={quickCreateData.currentStock}
+                  onChange={(e) => {
+                    const sanitized = e.target.value.replace(/[^0-9.]/g, '')
+                    setQuickCreateData(prev => ({ ...prev, currentStock: sanitized }))
+                  }}
+                />
+                {quickCreateData.unitId && quickCreateData.currentStock && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">
+                    {units.find(u => u.id === quickCreateData.unitId)?.symbol}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="mt-6">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setIsQuickCreateModalOpen(false)
+              setQuickCreateData({ name: "", categoryId: "", unitId: "", costPerUnit: "", currentStock: "" })
+              setCategorySearch("")
+              setUnitSearch("")
+            }}
+            className="cursor-pointer"
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleQuickCreate}
+            className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+          >
+            Crear artículo
+                </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Modal de selección de categorías */}
+    <Dialog open={isCategoryModalOpen} onOpenChange={setIsCategoryModalOpen}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="text-xl">Filtrar por Categorías</DialogTitle>
@@ -387,8 +596,8 @@ export default function ArticlesPage() {
               <div className="py-12 text-center">
                 <div className="text-4xl mb-4">📁</div>
                 <p className="text-gray-600">No hay categorías disponibles</p>
-              </div>
-            ) : (
+            </div>
+          ) : (
               <div className="grid grid-cols-2 gap-3">
                 {foodCategories.map((category) => {
                   const isSelected = selectedCategories.includes(category.id)
@@ -410,12 +619,12 @@ export default function ArticlesPage() {
                           <span className="text-blue-600 text-xl">✓</span>
                         )}
                       </div>
-                    </div>
+                          </div>
                   )
                 })}
-              </div>
-            )}
-          </div>
+                            </div>
+                          )}
+                        </div>
 
           <DialogFooter className="border-t pt-4 mt-4 flex justify-between">
             <Button 
@@ -424,7 +633,7 @@ export default function ArticlesPage() {
               className="cursor-pointer"
             >
               Limpiar todo
-            </Button>
+                            </Button>
             <div className="flex gap-2">
               <Button 
                 variant="outline" 
@@ -432,14 +641,14 @@ export default function ArticlesPage() {
                 className="cursor-pointer"
               >
                 Cancelar
-              </Button>
-              <Button 
+                            </Button>
+                            <Button 
                 className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
                 onClick={handleSaveCategories}
               >
                 Aplicar ({selectedCategories.length})
-              </Button>
-            </div>
+                            </Button>
+                        </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -469,7 +678,7 @@ export default function ArticlesPage() {
               </button>
             </div>
           </div>
-        )}
+          )}
 
         {/* Barra de búsqueda y filtros */}
         <div className="flex items-center gap-4 mb-6 flex-wrap">
@@ -499,44 +708,66 @@ export default function ArticlesPage() {
             )}
           </button>
 
-          <button
-            onClick={() => toggleSortOrder("price")}
-            className={cn(
-              "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer",
-              sortBy === "price" && "border-blue-500 bg-blue-50"
-            )}
-          >
-            <ArrowUpDown size={18} />
-            {sortBy === "price" 
-              ? sortOrder === "asc" ? "Precio: Menor a Mayor" : "Precio: Mayor a Menor"
-              : "Ordenar por precio"}
-          </button>
+          <div className="relative" ref={sortMenuRef}>
+            <button
+              onClick={() => setOpenSortMenu(!openSortMenu)}
+              className={cn(
+                "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer",
+                sortBy && "border-blue-500 bg-blue-50"
+              )}
+            >
+              <ArrowUpDown size={18} />
+              {getSortLabel()}
+              <ChevronDown size={18} />
+            </button>
 
-          <button
-            onClick={() => toggleSortOrder("name")}
-            className={cn(
-              "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer",
-              sortBy === "name" && "border-blue-500 bg-blue-50"
+            {openSortMenu && (
+              <div className="absolute left-0 top-full mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-10">
+                <button
+                  onClick={() => handleSortSelection("price")}
+                  className={cn(
+                    "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer",
+                    sortBy === "price" && "bg-blue-50 text-blue-600 font-medium"
+                  )}
+                >
+                  Precio {sortBy === "price" && (sortOrder === "asc" ? "↑" : "↓")}
+                </button>
+                <button
+                  onClick={() => handleSortSelection("name")}
+                  className={cn(
+                    "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer",
+                    sortBy === "name" && "bg-blue-50 text-blue-600 font-medium"
+                  )}
+                >
+                  Alfabéticamente {sortBy === "name" && (sortOrder === "asc" ? "↑" : "↓")}
+                </button>
+                <button
+                  onClick={() => handleSortSelection("stock")}
+                  className={cn(
+                    "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer",
+                    sortBy === "stock" && "bg-blue-50 text-blue-600 font-medium"
+                  )}
+                >
+                  Stock {sortBy === "stock" && (sortOrder === "asc" ? "↑" : "↓")}
+                </button>
+                {sortBy && (
+                  <>
+                    <div className="border-t border-gray-200 my-1"></div>
+                    <button
+                      onClick={() => {
+                        setSortBy(null)
+                        setSortOrder(null)
+                        setOpenSortMenu(false)
+                      }}
+                      className="w-full text-left px-4 py-3 hover:bg-gray-50 text-red-600 text-sm transition-colors cursor-pointer"
+                    >
+                      Limpiar orden
+                    </button>
+                  </>
+                )}
+              </div>
             )}
-          >
-            <ArrowUpDown size={18} />
-            {sortBy === "name" 
-              ? sortOrder === "asc" ? "A-Z" : "Z-A"
-              : "Ordenar alfabéticamente"}
-          </button>
-
-          <button
-            onClick={() => toggleSortOrder("stock")}
-            className={cn(
-              "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer",
-              sortBy === "stock" && "border-blue-500 bg-blue-50"
-            )}
-          >
-            <ArrowUpDown size={18} />
-            {sortBy === "stock" 
-              ? sortOrder === "asc" ? "Stock: Menor a Mayor" : "Stock: Mayor a Menor"
-              : "Ordenar por stock"}
-          </button>
+          </div>
 
           <div className="relative" ref={actionsMenuRef}>
             <button 
@@ -582,82 +813,13 @@ export default function ArticlesPage() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
           {/* Enlace para crear artículo rápidamente */}
           <div className="border-b border-gray-200 p-4">
-            {!showQuickCreate ? (
-              <button 
-                onClick={() => setShowQuickCreate(true)}
-                className="text-blue-600 hover:text-blue-700 flex items-center gap-2 font-medium transition-colors cursor-pointer"
-              >
-                <Plus size={18} />
-                Crear artículo rápidamente
-              </button>
-            ) : (
-              <div className="grid grid-cols-12 gap-4 items-center">
-                <div className="col-span-3">
-                  <Input
-                    placeholder="Nombre del artículo"
-                    value={quickCreateData.name}
-                    onChange={(e) => setQuickCreateData(prev => ({ ...prev, name: e.target.value }))}
-                    className="h-10"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <select
-                    value={quickCreateData.categoryId}
-                    onChange={(e) => setQuickCreateData(prev => ({ ...prev, categoryId: e.target.value }))}
-                    className="w-full h-10 px-3 border border-gray-300 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Seleccionar categoría</option>
-                    {foodCategories.map((cat) => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="Precio (€)"
-                    value={quickCreateData.costPerUnit}
-                    onChange={(e) => {
-                      const sanitized = e.target.value.replace(/[^0-9.]/g, '')
-                      setQuickCreateData(prev => ({ ...prev, costPerUnit: sanitized }))
-                    }}
-                    className="h-10"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="Stock"
-                    value={quickCreateData.currentStock}
-                    onChange={(e) => {
-                      const sanitized = e.target.value.replace(/[^0-9.]/g, '')
-                      setQuickCreateData(prev => ({ ...prev, currentStock: sanitized }))
-                    }}
-                    className="h-10"
-                  />
-                </div>
-                <div className="col-span-3 flex gap-2 justify-end">
-                  <Button
-                    onClick={handleQuickCreate}
-                    className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
-                  >
-                    Crear
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowQuickCreate(false)
-                      setQuickCreateData({ name: "", categoryId: "", costPerUnit: "", currentStock: "" })
-                    }}
-                    className="cursor-pointer"
-                  >
-                    Cancelar
-                  </Button>
-                </div>
-              </div>
-            )}
+            <button 
+              onClick={() => setIsQuickCreateModalOpen(true)}
+              className="text-blue-600 hover:text-blue-700 flex items-center gap-2 font-medium transition-colors cursor-pointer"
+            >
+              <Plus size={18} />
+              Crear artículo rápidamente
+            </button>
           </div>
 
           {/* Encabezados de tabla */}
@@ -708,8 +870,8 @@ export default function ArticlesPage() {
                     checked={selectedItems.includes(article.id)}
                     onChange={() => toggleSelectItem(article.id)}
                     className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                  />
-                </div>
+      />
+    </div>
 
                 <div className="col-span-4 flex items-center gap-3">
                   <div
