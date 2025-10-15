@@ -1,28 +1,18 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, Plus, Filter, Copy, Eye, Edit, BarChart3, Scale, AlertTriangle, ChefHat, Clock, Users, Trash2 } from "lucide-react"
+import { Search, Filter, Plus, Eye, Edit, TrendingUp, Copy, Trash2, Clock, Users, Package, DollarSign } from "lucide-react"
 import Link from "next/link"
 import { DatabaseService } from "@/lib/database"
 import { toast } from "sonner"
 import { DeleteConfirmationModal } from "@/components/ui/delete-confirmation-modal"
 import { useDeleteModal } from "@/hooks/use-delete-modal"
 
-const categories = ["Todos", "Entrantes", "Principales", "Postres", "Bebidas", "Aperitivos", "Sopas", "Ensaladas", "Otros"]
-const difficulties = ["Todos", "Fácil", "Intermedio", "Avanzado"]
-
 export default function RecipesPage() {
   const [recipes, setRecipes] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
-  const [categoryFilter, setCategoryFilter] = useState("Todos")
-  const [difficultyFilter, setDifficultyFilter] = useState("Todos")
   const { deleteModal, openDeleteModal, closeDeleteModal, setLoading: setDeleteLoading } = useDeleteModal()
 
   useEffect(() => {
@@ -41,7 +31,7 @@ export default function RecipesPage() {
           recipe_ingredients (
             id,
             cost,
-            ingredients (id, name)
+            articles (id, name)
           )
         `)
         .order('created_at', { ascending: false })
@@ -118,326 +108,305 @@ export default function RecipesPage() {
   }
 
   const filteredRecipes = recipes.filter((recipe) => {
-    const matchesSearch = recipe.name.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesCategory = categoryFilter === "Todos" || recipe.category === categoryFilter
-    const matchesDifficulty = difficultyFilter === "Todos" || recipe.difficulty === difficultyFilter
-    return matchesSearch && matchesCategory && matchesDifficulty
+    return recipe.name.toLowerCase().includes(searchTerm.toLowerCase())
   })
 
-  const getDifficultyBadge = (difficulty: string) => {
+  const totalRecipes = recipes.length
+  const averageMargin = recipes.length > 0 
+    ? recipes.reduce((acc, r) => acc + (r.margin || 0), 0) / recipes.length 
+    : 0
+  const totalCost = recipes.reduce((acc, r) => acc + (r.totalCost || 0), 0)
+  const averageTime = recipes.length > 0
+    ? Math.round(recipes.reduce((acc, r) => acc + (r.cooking_time || 0), 0) / recipes.length)
+    : 0
+
+  const getDifficultyColor = (difficulty: string): string => {
     switch (difficulty?.toLowerCase()) {
       case 'fácil':
       case 'facil':
-        return <Badge variant="default" className="bg-green-100 text-green-800">Fácil</Badge>
+        return 'bg-green-100 text-green-700 border-green-200'
       case 'intermedio':
-        return <Badge variant="default" className="bg-yellow-100 text-yellow-800">Intermedio</Badge>
+        return 'bg-yellow-100 text-yellow-700 border-yellow-200'
       case 'avanzado':
-        return <Badge variant="default" className="bg-red-100 text-red-800">Avanzado</Badge>
+      case 'difícil':
+        return 'bg-red-100 text-red-700 border-red-200'
       default:
-        return <Badge variant="outline">{difficulty || 'No especificado'}</Badge>
+        return 'bg-gray-100 text-gray-700 border-gray-200'
     }
+  }
+
+  const getProfitMarginColor = (margin: number): string => {
+    if (margin >= 70) return 'text-green-600'
+    if (margin >= 50) return 'text-yellow-600'
+    return 'text-red-600'
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="p-8 space-y-8 bg-gradient-to-br from-background via-background to-secondary/5 min-h-screen">
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <Card className="w-full max-w-md">
-            <CardHeader className="text-center">
-              <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-              <CardTitle className="text-red-600">Error</CardTitle>
-            </CardHeader>
-            <CardContent className="text-center space-y-4">
-              <p className="text-muted-foreground">{error}</p>
-              <Button onClick={loadRecipes} className="w-full">
-                Reintentar
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
       </div>
     )
   }
 
   return (
-    <div className="p-8 space-y-8 bg-gradient-to-br from-background via-background to-secondary/5 min-h-screen">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
-        <div>
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-secondary to-secondary/70 bg-clip-text text-transparent">
-            Escandallos
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Gestiona tus recetas y análisis de costos
-          </p>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-800 mb-2">Gestión de Recetas</h1>
+          <p className="text-gray-600">Administra y organiza todas tus recetas</p>
         </div>
-        <Link href="/recipes/new">
-          <Button className="bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-white shadow-lg hover:shadow-xl transition-all duration-300">
-            <Plus className="h-5 w-5 mr-2" />
-            Nuevo Escandallo
-          </Button>
-        </Link>
-      </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-card to-card/50">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Total Recetas</p>
-                <p className="text-2xl font-bold text-primary">{recipes.length}</p>
+        {/* Estadísticas con gráficas minimalistas */}
+        <div className="grid grid-cols-4 gap-4 mb-8">
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div className="flex items-center justify-between mb-3">
+              <div className="p-2 bg-blue-50 rounded-lg">
+                <Package className="text-blue-600" size={24} />
               </div>
-              <ChefHat className="h-8 w-8 text-primary" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-card to-card/50">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Costo Promedio</p>
-                <p className="text-2xl font-bold text-secondary">
-                  €{recipes.length > 0 ? (recipes.reduce((sum, r) => sum + r.totalCost, 0) / recipes.length).toFixed(2) : '0.00'}
-                </p>
-              </div>
-              <BarChart3 className="h-8 w-8 text-secondary" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-card to-card/50">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Margen Promedio</p>
-                <p className="text-2xl font-bold text-accent">
-                  {recipes.length > 0 ? (recipes.reduce((sum, r) => sum + (r.margin || 0), 0) / recipes.length).toFixed(1) : '0.0'}%
-                </p>
-              </div>
-              <Scale className="h-8 w-8 text-accent" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-card to-card/50">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Ingredientes Únicos</p>
-                <p className="text-2xl font-bold text-green-600">
-                  {new Set(recipes.flatMap(r => r.recipe_ingredients?.map((ri: any) => ri.ingredients?.id) || [])).size}
-                </p>
-              </div>
-              <Users className="h-8 w-8 text-green-600" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Filters */}
-      <Card className="border-0 shadow-lg bg-gradient-to-br from-card to-card/50">
-        <CardContent className="p-6">
-          <div className="flex flex-col lg:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                <Input
-                  placeholder="Buscar recetas..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
+              <div className="text-right">
+                <p className="text-2xl font-bold text-gray-800">{totalRecipes}</p>
+                <p className="text-xs text-gray-500 mt-1">Total Recetas</p>
               </div>
             </div>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full lg:w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {categories.map((category) => (
-                  <SelectItem key={category} value={category}>
-                    {category}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={difficultyFilter} onValueChange={setDifficultyFilter}>
-              <SelectTrigger className="w-full lg:w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {difficulties.map((difficulty) => (
-                  <SelectItem key={difficulty} value={difficulty}>
-                    {difficulty}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button variant="outline" className="flex items-center gap-2">
-              <Filter className="h-4 w-4" />
-              Filtros
-            </Button>
+            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-500 rounded-full" style={{ width: '100%' }}></div>
+            </div>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Recipes Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        {filteredRecipes.map((recipe) => (
-          <Card
-            key={recipe.id}
-            className="border-0 shadow-lg bg-gradient-to-br from-card to-card/50 hover:shadow-xl transition-all duration-300 cursor-pointer group"
-          >
-            <Link href={`/recipes/${recipe.id}`}>
-              <CardHeader className="pb-3">
-                <div className="flex justify-between items-start mb-2">
-                  <CardTitle className="text-lg font-semibold group-hover:text-primary transition-colors">
-                    {recipe.name}
-                  </CardTitle>
-                  {recipe.category && (
-                    <Badge variant="secondary" className="text-xs">
-                      {recipe.category}
-                    </Badge>
-                  )}
-                </div>
-                {recipe.description && (
-                  <CardDescription className="text-sm line-clamp-2">
-                    {recipe.description}
-                  </CardDescription>
-                )}
-              </CardHeader>
-            </Link>
-            <CardContent className="pt-0">
-              <div className="space-y-4">
-                {/* Stats */}
-                <div className="grid grid-cols-3 gap-4 text-center">
-                  <div>
-                    <div className="flex items-center justify-center gap-1 text-muted-foreground">
-                      <Users className="h-3 w-3" />
-                      <span className="text-xs">{recipe.servings || 0}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Raciones</p>
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-center gap-1 text-muted-foreground">
-                      <Clock className="h-3 w-3" />
-                      <span className="text-xs">{recipe.cooking_time || 0}m</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Tiempo</p>
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-center gap-1 text-muted-foreground">
-                      <ChefHat className="h-3 w-3" />
-                      <span className="text-xs">{recipe.ingredientCount}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Ingredientes</p>
-                  </div>
-                </div>
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div className="flex items-center justify-between mb-3">
+              <div className="p-2 bg-green-50 rounded-lg">
+                <TrendingUp className="text-green-600" size={24} />
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-gray-800">{averageMargin.toFixed(0)}%</p>
+                <p className="text-xs text-gray-500 mt-1">Margen Promedio</p>
+              </div>
+            </div>
+            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full bg-green-500 rounded-full" style={{ width: `${averageMargin}%` }}></div>
+            </div>
+          </div>
 
-                {/* Costs */}
-                <div className="bg-muted/50 rounded-lg p-3 space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Costo total:</span>
-                    <span className="font-semibold text-primary">€{recipe.totalCost.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Por ración:</span>
-                    <span className="font-semibold">€{recipe.costPerServing.toFixed(2)}</span>
-                  </div>
-                  {recipe.sale_price && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-muted-foreground">Margen:</span>
-                      <span className="font-semibold text-green-600">{recipe.margin.toFixed(1)}%</span>
-                    </div>
-                  )}
-                </div>
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div className="flex items-center justify-between mb-3">
+              <div className="p-2 bg-purple-50 rounded-lg">
+                <DollarSign className="text-purple-600" size={24} />
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-gray-800">{totalCost.toFixed(0)}€</p>
+                <p className="text-xs text-gray-500 mt-1">Costo Total</p>
+              </div>
+            </div>
+            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full bg-purple-500 rounded-full" style={{ width: '75%' }}></div>
+            </div>
+          </div>
 
-                {/* Difficulty and Tags */}
-                <div className="flex justify-between items-center">
-                  <div>
-                    {recipe.difficulty && getDifficultyBadge(recipe.difficulty)}
-                  </div>
-                </div>
+          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div className="flex items-center justify-between mb-3">
+              <div className="p-2 bg-orange-50 rounded-lg">
+                <Clock className="text-orange-600" size={24} />
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-gray-800">{averageTime}</p>
+                <p className="text-xs text-gray-500 mt-1">Min Promedio</p>
+              </div>
+            </div>
+            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full bg-orange-500 rounded-full" style={{ width: `${(averageTime / 120) * 100}%` }}></div>
+            </div>
+          </div>
+        </div>
 
-                {/* Actions */}
-                <div className="flex justify-between items-center pt-2 border-t">
-                  <div className="flex gap-1">
-                    <Link href={`/recipes/${recipe.id}`} onClick={(e) => e.stopPropagation()}>
-                      <Button variant="ghost" size="sm">
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                    </Link>
-                    <Link href={`/recipes/${recipe.id}/edit?from=list`} onClick={(e) => e.stopPropagation()}>
-                      <Button variant="ghost" size="sm">
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                    </Link>
-                    <Button variant="ghost" size="sm">
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                    <Link href={`/recipes/${recipe.id}/scale`} onClick={(e) => e.stopPropagation()}>
-                      <Button variant="ghost" size="sm">
-                        <Scale className="h-4 w-4" />
-                      </Button>
-                    </Link>
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        openDeleteModal(recipe)
-                      }}
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(recipe.updated_at).toLocaleDateString('es-ES')}
+        {/* Barra de búsqueda y acciones */}
+        <div className="flex items-center gap-4 mb-8">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input
+              type="text"
+              placeholder="Buscar recetas..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white shadow-sm"
+            />
+          </div>
+          
+          <button className="px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 shadow-sm transition-all cursor-pointer">
+            <Filter size={18} />
+            Filtros
+          </button>
+          
+          <Link href="/recipes/new">
+            <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer">
+              <Plus size={20} />
+              Nueva Receta
+            </button>
+          </Link>
+        </div>
+
+        {/* Grid de recetas - 4 columnas en desktop */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {filteredRecipes.map((recipe) => (
+            <div
+              key={recipe.id}
+              className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border border-gray-100 flex flex-col"
+            >
+              {/* Imagen de cabecera */}
+              <div className="relative h-48 overflow-hidden">
+                <img 
+                  src={recipe.image_url || '/placeholder.jpg'} 
+                  alt={recipe.name}
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute top-3 right-3">
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium border backdrop-blur-sm ${getDifficultyColor(recipe.difficulty || 'Fácil')}`}>
+                    {recipe.difficulty || 'Fácil'}
                   </span>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
 
-      {filteredRecipes.length === 0 && !loading && (
-        <Card className="text-center py-12 border-0 shadow-lg bg-gradient-to-br from-card to-card/50">
-          <CardContent>
-            <ChefHat className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-            <p className="text-muted-foreground mb-4">
-              {searchTerm || categoryFilter !== "Todos" || difficultyFilter !== "Todos"
-                ? "No se encontraron recetas con los filtros aplicados"
+              {/* Contenido */}
+              <div className="p-4 flex-1 flex flex-col">
+                <div className="mb-3">
+                  <h3 className="text-lg font-bold text-gray-800 mb-2 line-clamp-1">
+                    {recipe.name}
+                  </h3>
+                  
+                  {recipe.category && (
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      <span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-md text-xs font-medium">
+                        {recipe.category}
+                      </span>
+                    </div>
+                  )}
+                  
+                  {recipe.description && (
+                    <p className="text-gray-600 text-xs line-clamp-2">
+                      {recipe.description}
+                    </p>
+                  )}
+                </div>
+
+                {/* Métricas compactas */}
+                <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
+                  <div className="flex items-center gap-1 text-gray-600">
+                    <Users size={14} className="text-blue-500" />
+                    <span>{recipe.servings || 0} rac.</span>
+                  </div>
+                  
+                  <div className="flex items-center gap-1 text-gray-600">
+                    <Clock size={14} className="text-blue-500" />
+                    <span>{recipe.cooking_time || 0} min</span>
+                  </div>
+                  
+                  <div className="flex items-center gap-1 text-gray-600">
+                    <Package size={14} className="text-blue-500" />
+                    <span>{recipe.ingredientCount || 0} ing.</span>
+                  </div>
+                  
+                  <div className="flex items-center gap-1 text-gray-600">
+                    <DollarSign size={14} className="text-blue-500" />
+                    <span>{(recipe.totalCost || 0).toFixed(2)}€</span>
+                  </div>
+                </div>
+
+                {/* Información financiera */}
+                <div className="space-y-2 mb-3 text-xs border-t border-gray-100 pt-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Costo/ración</span>
+                    <span className="font-semibold text-gray-800">{(recipe.costPerServing || 0).toFixed(2)}€</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Margen</span>
+                    <div className="flex items-center gap-1">
+                      <span className={`font-bold ${getProfitMarginColor(recipe.margin || 0)}`}>
+                        {(recipe.margin || 0).toFixed(0)}%
+                      </span>
+                      <span className={`font-semibold ${getProfitMarginColor(recipe.margin || 0)}`}>
+                        ({((recipe.costPerServing || 0) * (recipe.margin || 0) / 100).toFixed(2)}€)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Acciones */}
+                <div className="flex items-center gap-1 pt-3 border-t border-gray-100 mt-auto">
+                  <Link
+                    href={`/recipes/${recipe.id}`}
+                    className="flex-1 px-2 py-2 text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition-colors flex items-center justify-center text-xs font-medium cursor-pointer"
+                    title="Ver"
+                  >
+                    <Eye size={14} />
+                  </Link>
+                  
+                  <Link
+                    href={`/recipes/${recipe.id}/edit?from=list`}
+                    className="flex-1 px-2 py-2 text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition-colors flex items-center justify-center text-xs font-medium cursor-pointer"
+                    title="Editar"
+                  >
+                    <Edit size={14} />
+                  </Link>
+                  
+                  <Link
+                    href={`/recipes/${recipe.id}/scale`}
+                    className="flex-1 px-2 py-2 text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition-colors flex items-center justify-center text-xs font-medium cursor-pointer"
+                    title="Escalar"
+                  >
+                    <TrendingUp size={14} />
+                  </Link>
+                  
+                  <button
+                    className="px-2 py-2 text-gray-700 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition-colors flex items-center justify-center text-xs font-medium cursor-pointer"
+                    title="Duplicar"
+                  >
+                    <Copy size={14} />
+                  </button>
+                  
+                  <button
+                    onClick={() => openDeleteModal(recipe)}
+                    className="px-2 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors flex items-center justify-center text-xs font-medium cursor-pointer"
+                    title="Eliminar"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {filteredRecipes.length === 0 && !loading && (
+          <div className="text-center py-12 bg-white rounded-xl shadow-sm border border-gray-100">
+            <Package className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <p className="text-gray-600 mb-4">
+              {searchTerm
+                ? "No se encontraron recetas con ese término de búsqueda"
                 : "No hay recetas registradas"}
             </p>
             <Link href="/recipes/new">
-              <Button className="bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 text-white">
-                <Plus className="h-4 w-4 mr-2" />
+              <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all mx-auto cursor-pointer">
+                <Plus size={20} />
                 Crear Primera Receta
-              </Button>
+              </button>
             </Link>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
 
-      {/* Delete Confirmation Modal */}
-      <DeleteConfirmationModal
-        isOpen={deleteModal.isOpen}
-        onClose={closeDeleteModal}
-        onConfirm={handleDelete}
-        title="Eliminar Receta"
-        description="¿Estás seguro de que deseas eliminar la receta"
-        itemName={deleteModal.item?.name || ''}
-        isLoading={deleteModal.isLoading}
-      />
+        {/* Delete Confirmation Modal */}
+        <DeleteConfirmationModal
+          isOpen={deleteModal.isOpen}
+          onClose={closeDeleteModal}
+          onConfirm={handleDelete}
+          title="Eliminar Receta"
+          description="¿Estás seguro de que deseas eliminar la receta"
+          itemName={deleteModal.item?.name || ''}
+          isLoading={deleteModal.isLoading}
+        />
+      </div>
     </div>
   )
 }
