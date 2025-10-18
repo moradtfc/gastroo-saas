@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { Search, Filter, ChevronDown, Plus, MoreVertical, ArrowUpDown } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -19,6 +19,7 @@ interface Article {
   current_stock: number
   unit: string
   image_url?: string | null
+  color?: string | null
   sku?: string | null
   suppliers?: {
     name: string
@@ -52,6 +53,8 @@ export default function ArticlesPage() {
   })
   const [categorySearch, setCategorySearch] = useState("")
   const [unitSearch, setUnitSearch] = useState("")
+  const [currentPage, setCurrentPage] = useState(1)
+  const articlesPerPage = 12
   const menuRef = useRef<HTMLDivElement>(null)
   const actionsMenuRef = useRef<HTMLDivElement>(null)
   const sortMenuRef = useRef<HTMLDivElement>(null)
@@ -372,6 +375,43 @@ export default function ArticlesPage() {
     return colors[index]
   }
 
+  const getArticleDisplayStyle = (article: Article) => {
+    // Si hay imagen, no mostrar color de fondo (la imagen tiene prioridad)
+    if (article.image_url) {
+      return {
+        backgroundImage: `url(${article.image_url})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundColor: 'transparent'
+      }
+    }
+    
+    // Si hay color guardado, usarlo
+    if (article.color) {
+      return {
+        backgroundColor: article.color
+      }
+    }
+    
+    // Fallback al color generado por nombre
+    return {}
+  }
+
+  const getArticleDisplayClass = (article: Article) => {
+    // Si hay imagen, no usar clases de color
+    if (article.image_url) {
+      return "w-10 h-10 rounded flex items-center justify-center text-white text-sm font-semibold"
+    }
+    
+    // Si hay color guardado, usar clase genérica
+    if (article.color) {
+      return "w-10 h-10 rounded flex items-center justify-center text-white text-sm font-semibold"
+    }
+    
+    // Fallback al color generado por nombre
+    return `w-10 h-10 rounded flex items-center justify-center text-white text-sm font-semibold ${getColorFromName(article.name)}`
+  }
+
   const filteredArticles = articles
     .filter((article) => {
       const matchesSearch = article.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -409,6 +449,17 @@ export default function ArticlesPage() {
       
       return 0
     })
+
+  // Lógica de paginación
+  const totalPages = Math.ceil(filteredArticles.length / articlesPerPage)
+  const startIndex = (currentPage - 1) * articlesPerPage
+  const endIndex = startIndex + articlesPerPage
+  const paginatedArticles = filteredArticles.slice(startIndex, endIndex)
+
+  // Resetear página cuando cambien los filtros
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, selectedCategories, sortBy, sortOrder])
 
   if (loading) {
     return (
@@ -859,7 +910,7 @@ export default function ArticlesPage() {
               </Link>
             </div>
           ) : (
-            filteredArticles.map((article) => (
+            paginatedArticles.map((article) => (
               <div
                 key={article.id}
                 className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 hover:bg-gray-50 items-center transition-colors"
@@ -875,11 +926,10 @@ export default function ArticlesPage() {
 
                 <div className="col-span-4 flex items-center gap-3">
                   <div
-                    className={`w-10 h-10 rounded flex items-center justify-center text-white text-sm font-semibold ${getColorFromName(
-                      article.name
-                    )}`}
+                    className={getArticleDisplayClass(article)}
+                    style={getArticleDisplayStyle(article)}
                   >
-                    {getInitials(article.name)}
+                    {!article.image_url && getInitials(article.name)}
                   </div>
                   <Link href={`/articles/${article.id}`}>
                     <span className="text-blue-600 font-medium hover:underline cursor-pointer">
@@ -943,12 +993,66 @@ export default function ArticlesPage() {
               </div>
             ))
           )}
+
+          {/* Controles de paginación */}
+          {filteredArticles.length > articlesPerPage && (
+            <div className="mt-6 mb-8 flex items-center justify-center gap-2">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  currentPage === 1
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                }`}
+              >
+                Anterior
+              </button>
+              
+              {/* Números de página */}
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(page => 
+                  page === 1 || 
+                  page === totalPages || 
+                  (page >= currentPage - 1 && page <= currentPage + 1)
+                )
+                .map((page, index, array) => (
+                  <React.Fragment key={page}>
+                    {index > 0 && array[index - 1] !== page - 1 && (
+                      <span className="px-2 text-gray-400">...</span>
+                    )}
+                    <button
+                      onClick={() => setCurrentPage(page)}
+                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        currentPage === page
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  </React.Fragment>
+                ))}
+              
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  currentPage === totalPages
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                }`}
+              >
+                Siguiente
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Información de resultados */}
         {filteredArticles.length > 0 && (
           <div className="mt-4 text-sm text-gray-600 text-center">
-            Mostrando {filteredArticles.length} de {articles.length} artículo(s)
+            Mostrando {startIndex + 1}-{Math.min(endIndex, filteredArticles.length)} de {filteredArticles.length} artículo(s)
           </div>
         )}
 

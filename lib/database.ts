@@ -65,6 +65,7 @@ export interface Article {
   sku?: string // Added
   image_url?: string // Optional image URL (limited to 1 per article)
   image_updated_at?: string // Timestamp of last image update
+  color?: string // Background color for article card (hex color code)
   cost_per_unit?: number
   current_stock?: number
   min_stock?: number
@@ -91,6 +92,8 @@ export interface Recipe {
   difficulty?: string
   sale_price?: number
   instructions?: string
+  image_url?: string // Base64 encoded image data or URL
+  color?: string // Background color for recipe card (hex color code)
   created_at: string
   updated_at: string
 }
@@ -649,14 +652,41 @@ export class DatabaseService {
   }
 
   static async createRecipe(recipe: Omit<Recipe, 'id' | 'created_at' | 'updated_at'>) {
-    const { data, error } = await supabase
+    let result = await supabase
       .from('recipes')
       .insert(recipe)
       .select()
       .single()
     
-    if (error) throw error
-    return data as Recipe
+    // Manejar errores específicos y reintentar
+    if (result.error) {
+      const errorMsg = result.error.message.toLowerCase()
+      let retryRecipe = { ...recipe }
+      
+      // Estrategia 1: Si hay problema con el campo color, quitarlo
+      if (errorMsg.includes('color') || errorMsg.includes('column') || result.error.code === '42703') {
+        console.warn('Campo "color" no existe en la tabla, reintentando sin él...')
+        const { color, ...recipeWithoutColor } = retryRecipe as any
+        retryRecipe = recipeWithoutColor
+      }
+      
+      // Estrategia 2: Si hay error de índice con image_url, quitar la imagen
+      if (errorMsg.includes('index row requires') || errorMsg.includes('maximum size is') || result.error.code === '54000') {
+        console.warn('Error de índice detectado con image_url, reintentando sin imagen...')
+        const { image_url, ...recipeWithoutImage } = retryRecipe as any
+        retryRecipe = recipeWithoutImage
+      }
+      
+      // Reintentar inserción con los datos corregidos
+      result = await supabase
+        .from('recipes')
+        .insert(retryRecipe)
+        .select()
+        .single()
+    }
+    
+    if (result.error) throw result.error
+    return result.data as Recipe
   }
 
   // Menus

@@ -163,12 +163,12 @@ export default function EditArticlePage({ params }: EditArticlePageProps) {
 
       setFormData({
         name: data.name || "",
-        description: data.description || "",
+        description: "", // Campo description del formulario (no se persiste en BD)
         categoryId: data.food_category_id || "",
         costPerUnit: data.cost_per_unit?.toString() || "",
         unitId: data.unit_id || "",
         supplierId: data.supplier_id || "",
-        notes: data.notes || "",
+        notes: "", // Campo notes del formulario (no se persiste en BD)
         sku: data.sku || "",
         allergens: loadedAllergens.map((a: any) => a.id),
         minStock: data.min_stock?.toString() || "",
@@ -184,6 +184,10 @@ export default function EditArticlePage({ params }: EditArticlePageProps) {
 
       if (data.image_url) {
         setUploadedImage(data.image_url)
+      }
+
+      if (data.color) {
+        setSelectedColor(data.color)
       }
     } catch (error: any) {
       console.error('Error loading article:', error)
@@ -221,7 +225,6 @@ export default function EditArticlePage({ params }: EditArticlePageProps) {
       const selectedCategory = foodCategories.find((c) => c.id === formData.categoryId)
       const articleData: any = {
         name: formData.name,
-        description: formData.description || null,
         food_category_id: formData.categoryId,
         unit_id: formData.unitId,
         default_unit_id: baseUnitForCategory?.id || formData.unitId,
@@ -232,7 +235,8 @@ export default function EditArticlePage({ params }: EditArticlePageProps) {
         supplier_id: formData.supplierId || null,
         category: selectedCategory?.name || null,
         unit: selectedUnitInfo.symbol || selectedUnitInfo.name,
-        notes: formData.notes || null,
+        color: selectedColor,
+        image_url: uploadedImage,
       }
 
       // Actualizar el artículo
@@ -284,13 +288,101 @@ export default function EditArticlePage({ params }: EditArticlePageProps) {
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        setUploadedImage(reader.result as string)
-      }
-      reader.readAsDataURL(file)
+    if (!file) return
+
+    // Verificar tamaño del archivo (máximo 5MB)
+    const sizeInMB = file.size / (1024 * 1024)
+    if (sizeInMB > 5) {
+      toast.error(`La imagen es demasiado grande (${sizeInMB.toFixed(2)} MB). Por favor, selecciona una imagen menor a 5MB.`)
+      return
     }
+
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const result = reader.result as string
+      
+      console.log('📊 Imagen leída, iniciando compresión...')
+      
+      // Comprimir la imagen para reducir el tamaño base64
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        
+        if (!ctx) {
+          console.warn('⚠️ No se pudo obtener contexto del canvas, usando imagen original')
+          setUploadedImage(result)
+          return
+        }
+
+        // Calcular nuevo tamaño manteniendo aspect ratio
+        let { width, height } = img
+        const maxSize = 400 // Reducido de 800 a 400px para compresión más agresiva
+        
+        console.log('🖼️ Dimensiones originales:', { width, height })
+        
+        if (width > maxSize || height > maxSize) {
+          if (width > height) {
+            height = (height * maxSize) / width
+            width = maxSize
+          } else {
+            width = (width * maxSize) / height
+            height = maxSize
+          }
+          console.log('📐 Redimensionando a:', { width: Math.round(width), height: Math.round(height) })
+        }
+
+        canvas.width = width
+        canvas.height = height
+
+        // Dibujar imagen redimensionada
+        ctx.drawImage(img, 0, 0, width, height)
+        
+        // Compresión simple: solo reducir tamaño y calidad básica
+        // Una vez eliminado el índice problemático, no necesitamos compresión agresiva
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8) // 80% calidad
+        
+        console.log(`✅ Compresión simple: ${Math.round(width)}x${Math.round(height)}, calidad 0.8, ${compressedBase64.length} caracteres`)
+        
+        // Verificar tamaño del resultado comprimido
+        const sizeInBytes = (compressedBase64.length * 3) / 4
+        const sizeInKB = sizeInBytes / 1024
+        const sizeInMB = sizeInBytes / (1024 * 1024)
+        
+        console.log('✅ Imagen comprimida:', {
+          tamañoKB: sizeInKB.toFixed(2),
+          tamañoMB: sizeInMB.toFixed(2),
+          longitud: compressedBase64.length,
+          longitudBase64: compressedBase64.length,
+          dimensiones: `${Math.round(width)}x${Math.round(height)}`,
+          calidad: '0.8'
+        })
+        
+        // Nota: Una vez eliminado el índice problemático, no debería haber límite de caracteres base64
+        // Mantenemos solo el límite de 1MB en bytes para el tamaño real de la imagen
+        
+        // Límite de 1MB para el tamaño real de la imagen
+        if (sizeInBytes > 1 * 1024 * 1024) {
+          toast.error(`La imagen comprimida es demasiado grande (${sizeInMB.toFixed(2)} MB). Por favor, selecciona una imagen más pequeña.`)
+          return
+        }
+        
+        if (sizeInBytes > 500 * 1024) { // Advertencia si es > 500KB (reducido de 1MB)
+          toast.warning(`La imagen es grande (${sizeInKB.toFixed(0)} KB). Puede tardar en guardarse.`)
+        }
+        
+        console.log('💾 Guardando imagen comprimida')
+        setUploadedImage(compressedBase64)
+        toast.success('Imagen cargada correctamente')
+      }
+      img.onerror = () => {
+        // Si falla la compresión, usar la imagen original
+        console.warn('⚠️ Error al cargar imagen para compresión, usando original')
+        setUploadedImage(result)
+      }
+      img.src = result
+    }
+    reader.readAsDataURL(file)
   }
 
   const handleCostChange = (value: string) => {
