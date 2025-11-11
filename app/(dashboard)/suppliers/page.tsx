@@ -1,17 +1,16 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Search, Eye, Edit, Trash2, Building, Phone, Globe, MapPin, AlertTriangle } from "lucide-react"
-import { DatabaseService } from "@/lib/database"
+import { Plus, Search, ChevronDown, MoreVertical, ArrowUpDown } from "lucide-react"
+import { DatabaseService, Group } from "@/lib/database"
 import { toast } from "sonner"
 import { DeleteConfirmationModal } from "@/components/ui/delete-confirmation-modal"
+import { CreateSupplierModal } from "./create-supplier-modal"
+import { ManageGroupsModal } from "./manage-groups-modal"
+import { GroupFilterModal } from "./group-filter-modal"
+import { cn } from "@/lib/utils"
 
 import { useDeleteModal } from "@/hooks/use-delete-modal"
 
@@ -20,19 +19,76 @@ export default function SuppliersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
-  const [categoryFilter, setCategoryFilter] = useState("all")
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [isGroupsModalOpen, setIsGroupsModalOpen] = useState(false)
+  const [selectedItems, setSelectedItems] = useState<string[]>([])
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [showBanner, setShowBanner] = useState(true)
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null)
+  const [sortBy, setSortBy] = useState<"name" | "email" | null>(null)
+  const [openSortMenu, setOpenSortMenu] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [groups, setGroups] = useState<Group[]>([])
+  const [supplierGroupsMap, setSupplierGroupsMap] = useState<Record<string, Group[]>>({})
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
+  const [isGroupFilterModalOpen, setIsGroupFilterModalOpen] = useState(false)
+  const suppliersPerPage = 12
+  const menuRef = useRef<HTMLDivElement>(null)
+  const sortMenuRef = useRef<HTMLDivElement>(null)
   const { deleteModal, openDeleteModal, closeDeleteModal, setLoading: setDeleteLoading } = useDeleteModal()
 
   useEffect(() => {
     loadSuppliers()
   }, [])
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenMenuId(null)
+      }
+      if (sortMenuRef.current && !sortMenuRef.current.contains(event.target as Node)) {
+        setOpenSortMenu(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
   const loadSuppliers = async () => {
     try {
       setLoading(true)
       setError(null)
-      const data = await DatabaseService.getSuppliers()
-      setSuppliers(data || [])
+      const [suppliersData, groupsData, supplierGroupsResponse] = await Promise.all([
+        DatabaseService.getSuppliers(),
+        DatabaseService.getGroups(),
+        DatabaseService.supabase
+          .from('supplier_groups')
+          .select(`
+            supplier_id,
+            group:groups(*)
+          `)
+      ])
+
+      if (supplierGroupsResponse.error) throw supplierGroupsResponse.error
+
+      const supplierGroupData = ((supplierGroupsResponse.data || []) as unknown) as Array<{
+        supplier_id: string
+        group: Group | null
+      }>
+
+      const groupMap: Record<string, Group[]> = {}
+      supplierGroupData.forEach((relation) => {
+        if (!relation.group) return
+        if (!groupMap[relation.supplier_id]) {
+          groupMap[relation.supplier_id] = []
+        }
+        groupMap[relation.supplier_id].push(relation.group)
+      })
+
+      setSuppliers(suppliersData || [])
+      setGroups(groupsData || [])
+      setSupplierGroupsMap(groupMap)
     } catch (error) {
       console.error('Error loading suppliers:', error)
       setError('Error al cargar proveedores')
@@ -40,6 +96,36 @@ export default function SuppliersPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedItems.length === filteredSuppliers.length) {
+      setSelectedItems([])
+    } else {
+      setSelectedItems(filteredSuppliers.map((s) => s.id))
+    }
+  }
+
+  const toggleSelectItem = (id: string) => {
+    if (selectedItems.includes(id)) {
+      setSelectedItems(selectedItems.filter((i) => i !== id))
+    } else {
+      setSelectedItems([...selectedItems, id])
+    }
+  }
+
+  const toggleMenu = (id: string) => {
+    setOpenMenuId(openMenuId === id ? null : id)
+  }
+
+  const handleView = (supplier: any) => {
+    window.location.href = `/suppliers/${supplier.id}`
+    setOpenMenuId(null)
+  }
+
+  const handleEdit = (supplier: any) => {
+    window.location.href = `/suppliers/${supplier.id}/edit`
+    setOpenMenuId(null)
   }
 
   const handleDelete = async () => {
@@ -65,233 +151,587 @@ export default function SuppliersPage() {
     }
   }
 
-  const filteredSuppliers = suppliers.filter((supplier) => {
-    const matchesSearch = supplier.name.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesCategory = categoryFilter === "all" || supplier.category === categoryFilter
-    return matchesSearch && matchesCategory
-  })
+  const handleDeleteMultiple = async () => {
+    if (selectedItems.length === 0) return
+    
+    if (!confirm(`¿Estás seguro de que deseas eliminar ${selectedItems.length} proveedor(es)?`)) {
+      return
+    }
 
-  const categories = Array.from(new Set(suppliers.map((supplier) => supplier.category).filter(Boolean)))
+    try {
+      for (const supplierId of selectedItems) {
+        await DatabaseService.supabase
+          .from('suppliers')
+          .delete()
+          .eq('id', supplierId)
+      }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
-      </div>
+      toast.success(`${selectedItems.length} proveedor(es) eliminado(s) correctamente`)
+      setSelectedItems([])
+      loadSuppliers()
+    } catch (error) {
+      console.error("Error eliminando proveedores:", error)
+      toast.error("Error al eliminar proveedores")
+    }
+  }
+
+  const buildWhatsappNumber = (supplier: any) => {
+    const countryCode = (supplier.phone_country_code || "").toString()
+    const phoneNumber = (supplier.phone_number || supplier.phone || "").toString()
+    const combined = `${countryCode}${phoneNumber}`.replace(/\D/g, "")
+    return combined
+  }
+
+  const handlePhoneClick = (supplier: any) => {
+    if (!supplier.has_whatsapp) {
+      return
+    }
+
+    const whatsappNumber = buildWhatsappNumber(supplier)
+
+    if (!whatsappNumber) {
+      toast.error("No se pudo abrir WhatsApp: número inválido")
+      return
+    }
+
+    const whatsappUrl = `https://wa.me/${whatsappNumber}`
+    window.open(whatsappUrl, "_blank")
+  }
+
+  const handleSortSelection = (type: "name" | "email") => {
+    if (sortBy === type) {
+      if (sortOrder === "asc") {
+        setSortOrder("desc")
+      } else if (sortOrder === "desc") {
+        setSortBy(null)
+        setSortOrder(null)
+      }
+    } else {
+      setSortBy(type)
+      setSortOrder("asc")
+    }
+    setOpenSortMenu(false)
+  }
+
+  const getMenuLabel = () => {
+    const labels: string[] = []
+
+    if (sortBy) {
+      if (sortBy === "name") {
+        labels.push(sortOrder === "asc" ? "A-Z" : "Z-A")
+      } else if (sortBy === "email") {
+        labels.push(sortOrder === "asc" ? "Email: A-Z" : "Email: Z-A")
+      }
+    }
+
+    if (selectedGroupIds.length > 0) {
+      if (selectedGroupIds.length === 1) {
+        const groupName = groups.find((group) => group.id === selectedGroupIds[0])?.name
+        labels.push(groupName ? `Grupo: ${groupName}` : "Grupo seleccionado")
+      } else {
+        labels.push(`Grupos (${selectedGroupIds.length})`)
+      }
+    }
+
+    if (labels.length === 0) {
+      return "Ordenar y Filtrar"
+    }
+
+    return labels.join(" • ")
+  }
+
+  const toggleGroupFilter = (groupId: string) => {
+    setSelectedGroupIds((prev) =>
+      prev.includes(groupId)
+        ? prev.filter((id) => id !== groupId)
+        : [...prev, groupId]
     )
   }
 
-  if (error) {
+  const clearGroupFilters = () => {
+    setSelectedGroupIds([])
+    setOpenSortMenu(false)
+  }
+
+  const getInitials = (name: string) => {
+    if (!name) return "?"
+    const words = name.trim().split(" ")
+    if (words.length >= 2) {
+      return (words[0][0] + words[1][0]).toUpperCase()
+    }
+    return name.substring(0, 2).toUpperCase()
+  }
+
+  const getColorFromName = (name: string) => {
+    const colors = [
+      "bg-blue-500",
+      "bg-green-500",
+      "bg-purple-500",
+      "bg-pink-500",
+      "bg-orange-500",
+      "bg-teal-500",
+      "bg-indigo-500",
+      "bg-red-500",
+    ]
+    const index = name.charCodeAt(0) % colors.length
+    return colors[index]
+  }
+
+  const selectedGroupDetails = selectedGroupIds
+    .map((groupId) => groups.find((group) => group.id === groupId))
+    .filter((group): group is Group => Boolean(group))
+
+  const filteredSuppliers = suppliers
+    .filter((supplier) => {
+      const supplierName = (supplier.name || "").toLowerCase()
+      const matchesSearch = supplierName.includes(searchTerm.toLowerCase())
+      const supplierGroupIds = (supplierGroupsMap[supplier.id] || []).map((group) => group.id)
+      const matchesGroup =
+        selectedGroupIds.length === 0 ||
+        supplierGroupIds.some((groupId) => selectedGroupIds.includes(groupId))
+
+      return matchesSearch && matchesGroup
+    })
+    .sort((a, b) => {
+      if (sortOrder === null || sortBy === null) return 0
+      
+      if (sortBy === "name") {
+        const nameA = a.name.toLowerCase()
+        const nameB = b.name.toLowerCase()
+        return sortOrder === "asc" 
+          ? nameA.localeCompare(nameB)
+          : nameB.localeCompare(nameA)
+      } else if (sortBy === "email") {
+        const emailA = (a.email || "").toLowerCase()
+        const emailB = (b.email || "").toLowerCase()
+        return sortOrder === "asc" 
+          ? emailA.localeCompare(emailB)
+          : emailB.localeCompare(emailA)
+      }
+      
+      return 0
+    })
+
+  // Lógica de paginación
+  const totalPages = Math.ceil(filteredSuppliers.length / suppliersPerPage)
+  const startIndex = (currentPage - 1) * suppliersPerPage
+  const endIndex = startIndex + suppliersPerPage
+  const paginatedSuppliers = filteredSuppliers.slice(startIndex, endIndex)
+
+  // Resetear página cuando cambien los filtros
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, sortBy, sortOrder, selectedGroupIds])
+
+  if (loading) {
     return (
-      <div className="p-8 space-y-8 bg-gradient-to-br from-background via-background to-secondary/5 min-h-screen">
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <Card className="w-full max-w-md">
-            <CardHeader className="text-center">
-              <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-              <CardTitle className="text-red-600">Error de Conexión</CardTitle>
-            </CardHeader>
-            <CardContent className="text-center space-y-4">
-              <p className="text-muted-foreground">{error}</p>
-              <Button onClick={loadSuppliers} className="w-full">
-                Reintentar
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
       </div>
     )
   }
 
   return (
-    <div className="p-8 space-y-8 bg-gradient-to-br from-background via-background to-secondary/5 min-h-screen">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
-        <div className="space-y-2">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-secondary to-secondary/70 bg-clip-text text-transparent">
-            Gestión de Proveedores
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Administra tu red de proveedores y sus contactos
-          </p>
-        </div>
-        <Link href="/suppliers/create">
-          <Button className="bg-gradient-to-r from-accent to-accent/90 hover:from-accent/90 hover:to-accent/80 text-accent-foreground shadow-lg hover:shadow-xl transition-all duration-300">
-            <Plus className="h-5 w-5 mr-2" />
-            Nuevo Proveedor
-          </Button>
-        </Link>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="bg-gradient-to-br from-card to-card/80 border-primary/10 hover:border-primary/20 transition-all duration-300">
-          <CardHeader className="pb-3">
-            <CardDescription className="text-sm font-medium">Total Proveedores</CardDescription>
-            <CardTitle className="text-3xl font-bold text-foreground">{suppliers.length}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="bg-gradient-to-br from-card to-card/80 border-secondary/10 hover:border-secondary/20 transition-all duration-300">
-          <CardHeader className="pb-3">
-            <CardDescription className="text-sm font-medium">Categorías</CardDescription>
-            <CardTitle className="text-3xl font-bold text-foreground">{categories.length}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="bg-gradient-to-br from-card to-card/80 border-accent/20 hover:border-accent/30 transition-all duration-300">
-          <CardHeader className="pb-3">
-            <CardDescription className="text-sm font-medium">Proveedores Activos</CardDescription>
-            <CardTitle className="text-3xl font-bold text-foreground">{suppliers.length}</CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
-
-      {/* Filters */}
-      <Card className="bg-gradient-to-br from-card to-card/90 border-border/50">
-        <CardHeader className="pb-4">
-          <CardTitle className="text-xl font-semibold">Filtros y Búsqueda</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar proveedores..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-12 h-12 bg-background/50 border-border/50 focus:border-primary/50 rounded-xl"
-                />
+    <>
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-7xl mx-auto">
+          {/* Banner de información */}
+          {showBanner && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center text-white text-sm font-bold">
+                  i
+                </div>
+                <span className="text-gray-700">
+                  <strong>Gestiona tus proveedores</strong> de forma eficiente y organizada.
+                </span>
+              </div>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setShowBanner(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+                >
+                  ✕
+                </button>
               </div>
             </div>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="Categoría" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas las categorías</SelectItem>
-                {categories.map((category) => (
-                  <SelectItem key={category} value={category}>
-                    {category}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+          )}
 
-      {/* Suppliers List */}
-      <Card className="bg-gradient-to-br from-card to-card/90 border-border/50">
-        <CardHeader className="pb-4">
-          <CardTitle className="text-xl font-semibold">Lista de Proveedores</CardTitle>
-          <CardDescription className="text-base">
-            {filteredSuppliers.length} proveedor(es) encontrado(s)
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {filteredSuppliers.length === 0 ? (
-            <div className="text-center py-12">
-              <Building className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-muted-foreground">No hay proveedores</h3>
-              <p className="text-muted-foreground mb-4">Comienza agregando tu primer proveedor</p>
-              <Link href="/suppliers/create">
-                <Button>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Agregar Proveedor
-                </Button>
-              </Link>
+          {/* Barra de búsqueda y filtros */}
+          <div className="flex items-center gap-4 mb-6 flex-wrap">
+            <div className="flex-1 min-w-[300px] relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+              <input
+                type="text"
+                placeholder="Buscar"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              />
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>Categoría</TableHead>
-                    <TableHead>Contacto</TableHead>
-                    <TableHead>Dirección</TableHead>
-                    <TableHead>Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredSuppliers.map((supplier) => (
-                    <TableRow key={supplier.id}>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          <Building className="h-4 w-4 text-muted-foreground" />
-                          {supplier.name}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {supplier.category ? (
-                          <Badge variant="secondary">{supplier.category}</Badge>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">Sin categoría</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          {supplier.phone && (
-                            <div className="flex items-center gap-1 text-sm">
-                              <Phone className="h-3 w-3" />
-                              {supplier.phone}
-                            </div>
-                          )}
-                          {supplier.email && (
-                            <div className="text-sm text-muted-foreground">
-                              {supplier.email}
-                            </div>
-                          )}
-                          {supplier.website && (
-                            <div className="flex items-center gap-1 text-sm">
-                              <Globe className="h-3 w-3" />
-                              <a 
-                                href={supplier.website.startsWith('http') ? supplier.website : `https://${supplier.website}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline"
-                              >
-                                {supplier.website}
-                              </a>
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1 text-sm">
-                          <MapPin className="h-3 w-3" />
-                          {supplier.address || 'Sin dirección'}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Link href={`/suppliers/${supplier.id}`}>
-                            <Button variant="ghost" size="sm">
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                          <Link href={`/suppliers/${supplier.id}/edit?from=list`}>
-                            <Button variant="ghost" size="sm">
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => openDeleteModal(supplier)}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+
+            <div className="relative" ref={sortMenuRef}>
+              <button
+                onClick={() => setOpenSortMenu(!openSortMenu)}
+                className={cn(
+                  "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer",
+                  (sortBy || selectedGroupIds.length > 0) && "border-blue-500 bg-blue-50"
+                )}
+              >
+                <ArrowUpDown size={18} />
+                {getMenuLabel()}
+                <ChevronDown size={18} />
+              </button>
+
+              {openSortMenu && (
+                <div className="absolute left-0 top-full mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-10">
+                  <div className="px-4 pb-2">
+                    <p className="text-xs font-semibold text-gray-400 uppercase">Ordenar</p>
+                  </div>
+                  <button
+                    onClick={() => handleSortSelection("name")}
+                    className={cn(
+                      "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer",
+                      sortBy === "name" && "bg-blue-50 text-blue-600 font-medium"
+                    )}
+                  >
+                    Alfabéticamente {sortBy === "name" && (sortOrder === "asc" ? "↑" : "↓")}
+                  </button>
+                  <button
+                    onClick={() => handleSortSelection("email")}
+                    className={cn(
+                      "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer",
+                      sortBy === "email" && "bg-blue-50 text-blue-600 font-medium"
+                    )}
+                  >
+                    Email {sortBy === "email" && (sortOrder === "asc" ? "↑" : "↓")}
+                  </button>
+                  <div className="border-t border-gray-200 my-2"></div>
+                  <div className="px-4 pb-2">
+                    <p className="text-xs font-semibold text-gray-400 uppercase">Filtros</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setIsGroupFilterModalOpen(true)
+                      setOpenSortMenu(false)
+                    }}
+                    className={cn(
+                      "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer flex items-center justify-between",
+                      selectedGroupIds.length > 0 && "bg-blue-50 text-blue-600 font-medium"
+                    )}
+                  >
+                    <span>Filtrar por grupo</span>
+                    {selectedGroupIds.length > 0 && (
+                      <span className="ml-3 inline-flex items-center justify-center rounded-full bg-blue-100 text-blue-600 text-xs font-semibold px-2 py-0.5">
+                        {selectedGroupIds.length}
+                      </span>
+                    )}
+                  </button>
+                  {(sortBy || selectedGroupIds.length > 0) && (
+                    <>
+                      <div className="border-t border-gray-200 my-2"></div>
+                      {selectedGroupIds.length > 0 && (
+                        <button
+                          onClick={() => {
+                            clearGroupFilters()
+                          }}
+                          className="w-full text-left px-4 py-3 hover:bg-gray-50 text-blue-600 text-sm transition-colors cursor-pointer"
+                        >
+                          Limpiar filtros
+                        </button>
+                      )}
+                      {sortBy && (
+                        <button
+                          onClick={() => {
+                            setSortBy(null)
+                            setSortOrder(null)
+                            setOpenSortMenu(false)
+                          }}
+                          className="w-full text-left px-4 py-3 hover:bg-gray-50 text-red-600 text-sm transition-colors cursor-pointer"
+                        >
+                          Limpiar orden
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <button 
+              onClick={() => setIsGroupsModalOpen(true)}
+              className="px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer"
+            >
+              Agrupar
+            </button>
+
+            <button 
+              onClick={() => setIsCreateModalOpen(true)}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm cursor-pointer"
+            >
+              Crear proveedor
+            </button>
+          </div>
+
+          {selectedGroupDetails.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 mb-6">
+              <span className="text-sm font-medium text-gray-600 mr-1">Grupos activos:</span>
+              {selectedGroupDetails.map((group) => (
+                <button
+                  key={group.id}
+                  type="button"
+                  onClick={() => toggleGroupFilter(group.id)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700 text-sm hover:bg-blue-100 transition-colors cursor-pointer"
+                >
+                  <span className="truncate max-w-[160px]">{group.name}</span>
+                  <span aria-hidden="true" className="text-blue-500 hover:text-blue-700">×</span>
+                  <span className="sr-only">Eliminar filtro de {group.name}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={clearGroupFilters}
+                className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors cursor-pointer"
+              >
+                Limpiar todo
+              </button>
             </div>
           )}
-        </CardContent>
-      </Card>
+
+          {/* Tabla de proveedores */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+            {/* Encabezados de tabla */}
+            <div className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 bg-gray-50 font-medium text-sm text-gray-700">
+              <div className="col-span-1 flex items-center">
+                <input
+                  type="checkbox"
+                  checked={
+                    filteredSuppliers.length > 0 &&
+                    selectedItems.length === filteredSuppliers.length
+                  }
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                />
+              </div>
+              <div className="col-span-4">Nombre</div>
+              <div className="col-span-3">Email</div>
+              <div className="col-span-2">Teléfono</div>
+              <div className="col-span-2">Categoría</div>
+            </div>
+
+            {/* Filas de proveedores */}
+          {filteredSuppliers.length === 0 ? (
+              <div className="p-12 text-center">
+                <div className="text-6xl mb-4">👥</div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">No hay proveedores</h3>
+                <p className="text-gray-500 mb-4">
+                  {searchTerm
+                    ? "No se encontraron proveedores con ese nombre"
+                    : "Comienza creando tu primer proveedor"}
+                </p>
+                <button 
+                  onClick={() => setIsCreateModalOpen(true)}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+                >
+                  <Plus className="inline-block mr-2" size={18} />
+                  Crear proveedor
+                </button>
+            </div>
+          ) : (
+              paginatedSuppliers.map((supplier) => (
+                <div
+                  key={supplier.id}
+                  className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 hover:bg-gray-50 items-center transition-colors"
+                >
+                  <div className="col-span-1 flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedItems.includes(supplier.id)}
+                      onChange={() => toggleSelectItem(supplier.id)}
+                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                        </div>
+
+                  <div className="col-span-4 flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded flex items-center justify-center text-white text-sm font-semibold ${getColorFromName(supplier.name)}`}>
+                      {getInitials(supplier.name)}
+                            </div>
+                    <span 
+                      onClick={() => handleView(supplier)}
+                      className="text-blue-600 font-medium hover:underline cursor-pointer"
+                    >
+                      {supplier.name}
+                    </span>
+                            </div>
+
+                  <div className="col-span-3 text-gray-700">
+                    {supplier.email || (
+                      <span className="text-gray-400 italic">Sin email</span>
+                    )}
+                            </div>
+
+                  <div className="col-span-2 text-gray-700">
+                    {supplier.phone ? (
+                      supplier.has_whatsapp ? (
+                        <button
+                          type="button"
+                          onClick={() => handlePhoneClick(supplier)}
+                          className="text-green-600 hover:text-green-700 font-medium underline-offset-2 hover:underline transition-colors cursor-pointer"
+                        >
+                          {supplier.phone}
+                        </button>
+                      ) : (
+                        supplier.phone
+                      )
+                    ) : (
+                      <span className="text-gray-400 italic">Sin teléfono</span>
+                    )}
+                  </div>
+
+                  <div className="col-span-2 flex items-center justify-between">
+                    <span className="text-gray-700">
+                      {supplier.food_category?.name || supplier.category || (
+                        <span className="text-gray-400 italic">Sin categoría</span>
+                      )}
+                    </span>
+                    <div
+                      className="relative"
+                      ref={openMenuId === supplier.id ? menuRef : null}
+                    >
+                      <button
+                        onClick={() => toggleMenu(supplier.id)}
+                        className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition-colors"
+                      >
+                        <MoreVertical size={20} />
+                      </button>
+
+                      {openMenuId === supplier.id && (
+                        <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-10">
+                          <button
+                            onClick={() => handleView(supplier)}
+                            className="w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer"
+                          >
+                            Ver detalles
+                          </button>
+                          <button
+                            onClick={() => handleEdit(supplier)}
+                            className="w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            onClick={() => {
+                              openDeleteModal(supplier)
+                              setOpenMenuId(null)
+                            }}
+                            className="w-full text-left px-4 py-3 hover:bg-red-50 text-red-600 text-sm transition-colors cursor-pointer"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+
+            {/* Controles de paginación */}
+            {filteredSuppliers.length > suppliersPerPage && (
+              <div className="mt-6 mb-8 flex items-center justify-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    currentPage === 1
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                  }`}
+                >
+                  Anterior
+                </button>
+                
+                {/* Números de página */}
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(page => 
+                    page === 1 || 
+                    page === totalPages || 
+                    (page >= currentPage - 1 && page <= currentPage + 1)
+                  )
+                  .map((page, index, array) => (
+                    <React.Fragment key={page}>
+                      {index > 0 && array[index - 1] !== page - 1 && (
+                        <span className="px-2 text-gray-400">...</span>
+                      )}
+                      <button
+                        onClick={() => setCurrentPage(page)}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          currentPage === page
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    </React.Fragment>
+                  ))}
+                
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    currentPage === totalPages
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                  }`}
+                >
+                  Siguiente
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Información de resultados */}
+          {filteredSuppliers.length > 0 && (
+            <div className="mt-4 text-sm text-gray-600 text-center">
+              Mostrando {startIndex + 1}-{Math.min(endIndex, filteredSuppliers.length)} de {filteredSuppliers.length} proveedor(es)
+            </div>
+          )}
+
+          {/* Barra inferior de selección múltiple */}
+          {selectedItems.length > 0 && (
+            <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50">
+              <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <span className="text-gray-700 font-medium">
+                    {selectedItems.length} seleccionado{selectedItems.length > 1 ? "s" : ""}
+                  </span>
+                  <button
+                    onClick={() => setSelectedItems([])}
+                    className="text-blue-600 hover:text-blue-700 font-medium transition-colors cursor-pointer"
+                  >
+                    Desmarcar todo
+                  </button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setIsGroupsModalOpen(true)}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm cursor-pointer"
+                  >
+                    Agrupar
+                  </button>
+                  <button
+                    onClick={handleDeleteMultiple}
+                    className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors shadow-sm cursor-pointer"
+                  >
+                    Eliminar proveedores
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       <DeleteConfirmationModal
         isOpen={deleteModal.isOpen}
@@ -302,6 +742,36 @@ export default function SuppliersPage() {
         itemName={deleteModal.item?.name || ''}
         isLoading={deleteModal.isLoading}
       />
-    </div>
+
+      <CreateSupplierModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={() => {
+          loadSuppliers()
+          setIsCreateModalOpen(false)
+        }}
+      />
+
+      <GroupFilterModal
+        isOpen={isGroupFilterModalOpen}
+        groups={groups}
+        selectedGroupIds={selectedGroupIds}
+        onClose={() => setIsGroupFilterModalOpen(false)}
+        onApply={(groupIds) => {
+          setSelectedGroupIds(groupIds)
+          setIsGroupFilterModalOpen(false)
+        }}
+      />
+
+      <ManageGroupsModal
+        isOpen={isGroupsModalOpen}
+        onClose={() => setIsGroupsModalOpen(false)}
+        selectedSupplierIds={selectedItems}
+        onSuccess={() => {
+          setSelectedItems([])
+          loadSuppliers()
+        }}
+      />
+    </>
   )
 }

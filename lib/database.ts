@@ -1,6 +1,32 @@
 import { supabase } from './supabase'
 
 // Types for our database tables
+export interface Country {
+  id: string
+  name: string
+  iso_code: string
+  iso_code3: string
+  phone_prefix: string
+  flag_emoji?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Group {
+  id: string
+  name: string
+  description?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SupplierGroup {
+  id: string
+  supplier_id: string
+  group_id: string
+  created_at: string
+}
+
 export interface Supplier {
   id: string
   name: string
@@ -11,8 +37,24 @@ export interface Supplier {
   contact_person?: string
   category?: string
   notes?: string
+  // New extended fields
+  country?: string
+  city?: string
+  province?: string
+  postal_code?: string
+  address_line2?: string
+  phone_country_code?: string
+  phone_number?: string
+  has_whatsapp?: boolean
+  first_name?: string
+  last_name?: string
+  birth_date?: string
+  tax_id?: string
+  company?: string
   created_at: string
   updated_at: string
+  food_category_id?: string
+  food_category?: FoodCategory
 }
 
 export interface Category {
@@ -149,6 +191,28 @@ export class DatabaseService {
     
     if (error) throw error
     return data as Unit[]
+  }
+
+  // Countries methods
+  static async getCountries() {
+    const { data, error } = await supabase
+      .from('countries')
+      .select('*')
+      .order('name')
+    
+    if (error) throw error
+    return data as Country[]
+  }
+
+  static async getCountryByCode(isoCode: string) {
+    const { data, error } = await supabase
+      .from('countries')
+      .select('*')
+      .eq('iso_code', isoCode)
+      .single()
+    
+    if (error) throw error
+    return data as Country
   }
 
   // Food Categories methods
@@ -337,7 +401,10 @@ export class DatabaseService {
   static async getSuppliers() {
     const { data, error } = await supabase
       .from('suppliers')
-      .select('*')
+      .select(`
+        *,
+        food_category:food_categories(*)
+      `)
       .order('name')
     
     if (error) throw error
@@ -528,6 +595,120 @@ export class DatabaseService {
     
     if (error) throw error
     return data as Supplier
+  }
+
+  static async updateSupplier(id: string, updates: Partial<Omit<Supplier, 'id' | 'created_at' | 'updated_at'>>) {
+    const { data, error } = await supabase
+      .from('suppliers')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+    
+    if (error) throw error
+    return data as Supplier
+  }
+
+  static async deleteSupplier(id: string) {
+    const { error } = await supabase
+      .from('suppliers')
+      .delete()
+      .eq('id', id)
+    
+    if (error) throw error
+  }
+
+  // Groups methods
+  static async getGroups() {
+    const { data, error } = await supabase
+      .from('groups')
+      .select('*')
+      .order('name')
+    
+    if (error) throw error
+    return data as Group[]
+  }
+
+  static async createGroup(group: Omit<Group, 'id' | 'created_at' | 'updated_at'>) {
+    const { data, error } = await supabase
+      .from('groups')
+      .insert(group)
+      .select()
+      .single()
+    
+    if (error) throw error
+    return data as Group
+  }
+
+  static async updateGroup(id: string, updates: Partial<Omit<Group, 'id' | 'created_at' | 'updated_at'>>) {
+    const { data, error } = await supabase
+      .from('groups')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+    
+    if (error) throw error
+    return data as Group
+  }
+
+  static async deleteGroup(id: string) {
+    const { error } = await supabase
+      .from('groups')
+      .delete()
+      .eq('id', id)
+    
+    if (error) throw error
+  }
+
+  // Supplier-Group relationship methods
+  static async addSuppliersToGroup(groupId: string, supplierIds: string[]) {
+    const records = supplierIds.map(supplierId => ({
+      group_id: groupId,
+      supplier_id: supplierId
+    }))
+
+    const { error } = await supabase
+      .from('supplier_groups')
+      .insert(records)
+    
+    if (error) throw error
+  }
+
+  static async removeSuppliersFromGroup(groupId: string, supplierIds: string[]) {
+    const { error } = await supabase
+      .from('supplier_groups')
+      .delete()
+      .eq('group_id', groupId)
+      .in('supplier_id', supplierIds)
+    
+    if (error) throw error
+  }
+
+  static async getSuppliersByGroup(groupId: string) {
+    const { data, error } = await supabase
+      .from('supplier_groups')
+      .select(`
+        supplier_id,
+        suppliers (*)
+      `)
+      .eq('group_id', groupId)
+    
+    if (error) throw error
+    return data
+  }
+
+  static async getGroupsBySupplier(supplierId: string) {
+    const { data, error } = await supabase
+      .from('supplier_groups')
+      .select(`
+        group_id,
+        groups (*)
+      `)
+      .eq('supplier_id', supplierId)
+    
+    if (error) throw error
+    return data
   }
 
   // Articles (Inventory items)
