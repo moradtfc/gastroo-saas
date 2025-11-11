@@ -486,7 +486,7 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
             <label className="block text-sm font-medium text-gray-900">
               Fecha de nacimiento
             </label>
-            <Popover>
+            <Popover modal={true}>
               <PopoverTrigger asChild>
                 <Button
                   type="button"
