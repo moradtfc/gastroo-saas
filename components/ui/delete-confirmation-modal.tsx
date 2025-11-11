@@ -1,16 +1,8 @@
 "use client"
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { Trash2 } from "lucide-react"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { AlertTriangle } from "lucide-react"
 
 interface DeleteConfirmationModalProps {
   isOpen: boolean
@@ -36,64 +28,70 @@ export function DeleteConfirmationModal({
   warningItems
 }: DeleteConfirmationModalProps) {
   return (
-    <AlertDialog open={isOpen} onOpenChange={onClose}>
-      <AlertDialogContent className="sm:max-w-[425px]">
-        <AlertDialogHeader>
-          <div className="flex flex-col items-center text-center space-y-3">
-            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
-              <Trash2 className="h-8 w-8 text-red-600" />
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-[450px] p-0">
+        <DialogHeader className="px-6 pt-6 pb-4">
+          <div className="flex flex-col items-center text-center space-y-4">
+            <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center">
+              <AlertTriangle className="h-8 w-8 text-red-600" />
             </div>
-            <AlertDialogTitle className="text-xl font-semibold text-gray-900">
+            <DialogTitle className="text-xl font-semibold text-gray-900">
               {title}
-            </AlertDialogTitle>
+            </DialogTitle>
           </div>
-          <AlertDialogDescription className="text-gray-600 text-center mt-4">
+        </DialogHeader>
+
+        <div className="px-6 pb-6">
+          <p className="text-gray-600 text-center">
             {description}
             <span className="font-semibold text-gray-900"> "{itemName}"</span>?
-            <br />
-            <span className="text-sm text-red-600 mt-3 block">
-              Esta acción no se puede deshacer.
-            </span>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+          </p>
+          <p className="text-sm text-red-600 mt-3 text-center font-medium">
+            Esta acción no se puede deshacer.
+          </p>
 
-        {/* Additional info and warnings */}
-        {(additionalInfo || warningItems) && (
-          <div className="px-6 pb-4">
-            {additionalInfo && (
-              <p className="text-sm text-orange-700 mb-3 font-medium">
-                {additionalInfo}
-              </p>
-            )}
-            {warningItems && warningItems.length > 0 && (
-              <ul className="space-y-2">
-                {warningItems.map((item, index) => (
-                  <li key={index} className="text-sm text-gray-600 flex items-start">
-                    <span className="mr-2">•</span>
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-        <AlertDialogFooter className="gap-2 sm:gap-2">
-          <AlertDialogCancel 
+          {/* Additional info and warnings */}
+          {(additionalInfo || warningItems) && (
+            <div className="mt-4 p-4 bg-orange-50 border border-orange-200 rounded-lg">
+              {additionalInfo && (
+                <p className="text-sm text-orange-700 mb-2 font-medium">
+                  {additionalInfo}
+                </p>
+              )}
+              {warningItems && warningItems.length > 0 && (
+                <ul className="space-y-1">
+                  {warningItems.map((item, index) => (
+                    <li key={index} className="text-sm text-orange-600 flex items-start">
+                      <span className="mr-2">•</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="px-6 py-4 border-t border-gray-200 flex gap-3 justify-end">
+          <Button
+            type="button"
+            variant="ghost"
             onClick={onClose}
             disabled={isLoading}
-            className="bg-white border-gray-300 text-gray-700 hover:bg-gray-50 hover:text-gray-900"
+            className="px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-100 rounded"
           >
             Cancelar
-          </AlertDialogCancel>
-          <AlertDialogAction
+          </Button>
+          <Button
+            type="button"
             onClick={onConfirm}
             disabled={isLoading}
-            className="bg-red-600 hover:bg-red-700 text-white border-red-600"
+            className="px-6 py-2.5 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? "Eliminando..." : "Eliminar"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

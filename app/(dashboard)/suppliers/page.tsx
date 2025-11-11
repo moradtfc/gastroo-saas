@@ -32,6 +32,7 @@ export default function SuppliersPage() {
   const [supplierGroupsMap, setSupplierGroupsMap] = useState<Record<string, Group[]>>({})
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [isGroupFilterModalOpen, setIsGroupFilterModalOpen] = useState(false)
+  const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null)
   const suppliersPerPage = 12
   const menuRef = useRef<HTMLDivElement>(null)
   const sortMenuRef = useRef<HTMLDivElement>(null)
@@ -119,12 +120,14 @@ export default function SuppliersPage() {
   }
 
   const handleView = (supplier: any) => {
-    window.location.href = `/suppliers/${supplier.id}`
+    setEditingSupplierId(supplier.id)
+    setIsCreateModalOpen(true)
     setOpenMenuId(null)
   }
 
   const handleEdit = (supplier: any) => {
-    window.location.href = `/suppliers/${supplier.id}/edit`
+    setEditingSupplierId(supplier.id)
+    setIsCreateModalOpen(true)
     setOpenMenuId(null)
   }
 
@@ -745,10 +748,15 @@ export default function SuppliersPage() {
 
       <CreateSupplierModal
         isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        supplierId={editingSupplierId}
+        onClose={() => {
+          setIsCreateModalOpen(false)
+          setEditingSupplierId(null)
+        }}
         onSuccess={() => {
           loadSuppliers()
           setIsCreateModalOpen(false)
+          setEditingSupplierId(null)
         }}
       />
 
