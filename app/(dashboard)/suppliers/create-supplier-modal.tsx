@@ -217,12 +217,12 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-[500px] max-h-[90vh] overflow-y-auto p-0">
-        <DialogHeader className="px-6 py-5 border-b border-gray-200">
+      <DialogContent className="max-w-[500px] max-h-[90vh] p-0 flex flex-col">
+        <DialogHeader className="px-6 py-5 border-b border-gray-200 flex-shrink-0">
           <DialogTitle className="text-lg font-semibold text-gray-900">Crear proveedor</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="px-6 py-6 space-y-5">
+        <form onSubmit={handleSubmit} className="px-6 py-6 space-y-5 overflow-y-auto flex-1">
           {/* Nombre y Apellidos */}
           <div className="space-y-2">
             <label htmlFor="firstName" className="block text-sm font-medium text-gray-900">
@@ -500,7 +500,7 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
                   {birthDate ? format(birthDate, "dd/MM/yyyy") : "Seleccionar fecha"}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
+              <PopoverContent className="w-auto p-0 z-[9999]" align="start" sideOffset={8}>
                 <Calendar
                   mode="single"
                   selected={birthDate}
@@ -529,17 +529,17 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
           </div>
         </form>
 
-        <DialogFooter className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-          <Button 
-            type="button" 
-            variant="ghost" 
+        <DialogFooter className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
+          <Button
+            type="button"
+            variant="ghost"
             onClick={handleClose}
             className="px-5 py-2.5 text-sm font-semibold text-blue-600 hover:bg-gray-100 rounded"
           >
             Cancelar
           </Button>
-          <Button 
-            type="submit" 
+          <Button
+            type="submit"
             disabled={loading}
             onClick={handleSubmit}
             className="px-6 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded"
