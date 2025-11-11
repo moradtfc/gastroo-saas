@@ -34,6 +34,7 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [selectedFoodCategoryId, setSelectedFoodCategoryId] = useState("")
   const [birthDate, setBirthDate] = useState<Date | undefined>(undefined)
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false)
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -212,6 +213,7 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
     setSelectedGroupIds([])
     setSelectedFoodCategoryId("")
     setBirthDate(undefined)
+    setIsCalendarOpen(false)
     onClose()
   }
 
@@ -486,11 +488,12 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
             <label className="block text-sm font-medium text-gray-900">
               Fecha de nacimiento
             </label>
-            <Popover modal={true}>
+            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen} modal={true}>
               <PopoverTrigger asChild>
                 <Button
                   type="button"
                   variant="outline"
+                  onClick={() => setIsCalendarOpen(true)}
                   className={cn(
                     "w-full justify-start text-left font-normal px-3 py-2 text-sm border border-gray-300 rounded focus:border-blue-600 focus:ring-0",
                     !birthDate && "text-gray-500"
@@ -504,7 +507,10 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
                 <Calendar
                   mode="single"
                   selected={birthDate}
-                  onSelect={setBirthDate}
+                  onSelect={(date) => {
+                    setBirthDate(date)
+                    setIsCalendarOpen(false)
+                  }}
                   captionLayout="dropdown-buttons"
                   fromYear={1900}
                   toYear={new Date().getFullYear()}
