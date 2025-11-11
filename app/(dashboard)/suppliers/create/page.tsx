@@ -14,6 +14,7 @@ import { Save, Building, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { DatabaseService } from "@/lib/database"
 import { toast } from "sonner"
+import { DatePicker } from "@/components/ui/date-picker"
 
 const categoryOptions = [
   "Verduras y Frutas",
@@ -41,6 +42,7 @@ export default function CreateSupplierPage() {
     contactPerson: "",
     notes: "",
   })
+  const [birthDate, setBirthDate] = useState<Date | undefined>(undefined)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -56,6 +58,7 @@ export default function CreateSupplierPage() {
         email: formData.email || null,
         contact_person: formData.contactPerson || null,
         notes: formData.notes || null,
+        birth_date: birthDate ? birthDate.toISOString().split('T')[0] : null,
       }
 
       await DatabaseService.createSupplier(supplierData)
@@ -202,6 +205,15 @@ export default function CreateSupplierPage() {
                       onChange={(e) => handleInputChange("contactPerson", e.target.value)}
                     />
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="birthDate">Fecha de Nacimiento</Label>
+                  <DatePicker
+                    date={birthDate}
+                    onDateChange={setBirthDate}
+                    placeholder="Seleccionar fecha de nacimiento"
+                  />
                 </div>
 
                 <div className="space-y-2">

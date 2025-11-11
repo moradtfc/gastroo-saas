@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, Save, Building } from "lucide-react"
 import Link from "next/link"
+import { DatePicker } from "@/components/ui/date-picker"
 
 const categoryOptions = [
   "Verduras y Frutas",
@@ -40,6 +41,7 @@ export default function NewSupplierPage() {
     contactPerson: "",
     notes: "",
   })
+  const [birthDate, setBirthDate] = useState<Date | undefined>(undefined)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -186,6 +188,15 @@ export default function NewSupplierPage() {
                       onChange={(e) => handleInputChange("contactPerson", e.target.value)}
                     />
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="birthDate">Fecha de Nacimiento</Label>
+                  <DatePicker
+                    date={birthDate}
+                    onDateChange={setBirthDate}
+                    placeholder="Seleccionar fecha de nacimiento"
+                  />
                 </div>
 
                 <div className="space-y-2">

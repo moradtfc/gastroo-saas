@@ -14,6 +14,7 @@ import { BackButton } from "@/components/ui/back-button"
 import { useRouter, useSearchParams } from "next/navigation"
 import { DatabaseService } from "@/lib/database"
 import { toast } from "sonner"
+import { DatePicker } from "@/components/ui/date-picker"
 
 const categoryOptions = [
   "Verduras y Frutas",
@@ -51,6 +52,7 @@ export default function EditSupplierPage({ params }: EditSupplierPageProps) {
     category: "",
     notes: "",
   })
+  const [birthDate, setBirthDate] = useState<Date | undefined>(undefined)
 
   // Determine back URL based on where user came from
   const getBackUrl = () => {
@@ -90,6 +92,10 @@ export default function EditSupplierPage({ params }: EditSupplierPageProps) {
         category: data.category || "",
         notes: data.notes || "",
       })
+      // Set birth date if it exists
+      if (data.birth_date) {
+        setBirthDate(new Date(data.birth_date))
+      }
     } catch (error: any) {
       console.error('Error loading supplier:', error)
       setError(error.message || 'Error al cargar proveedor')
@@ -113,6 +119,7 @@ export default function EditSupplierPage({ params }: EditSupplierPageProps) {
         contact_person: formData.contactPerson || null,
         category: formData.category || null,
         notes: formData.notes || null,
+        birth_date: birthDate ? birthDate.toISOString().split('T')[0] : null,
       }
 
       const { error } = await DatabaseService.supabase
@@ -307,6 +314,17 @@ export default function EditSupplierPage({ params }: EditSupplierPageProps) {
                         className="h-10"
                       />
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="birthDate" className="text-sm font-medium">
+                      Fecha de Nacimiento
+                    </Label>
+                    <DatePicker
+                      date={birthDate}
+                      onDateChange={setBirthDate}
+                      placeholder="Seleccionar fecha de nacimiento"
+                    />
                   </div>
 
                   <div className="space-y-2">
