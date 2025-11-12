@@ -38,9 +38,15 @@ interface PurchaseItem {
   availableUnits: Unit[]
 }
 
-export default function CreatePurchasePage() {
+interface PurchaseFormProps {
+  purchaseId?: string
+}
+
+export default function CreatePurchasePage({ purchaseId }: PurchaseFormProps = {}) {
   const router = useRouter()
+  const isEditMode = !!purchaseId
   const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(isEditMode)
   const [scrolled, setScrolled] = useState(false)
   const [articles, setArticles] = useState<Article[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -58,6 +64,15 @@ export default function CreatePurchasePage() {
     description: "",
     purchaseDate: new Date().toISOString().split("T")[0],
     status: "paid"
+  })
+
+  const [initialData, setInitialData] = useState({
+    name: "",
+    description: "",
+    purchaseDate: "",
+    status: "",
+    supplierId: "",
+    items: [] as PurchaseItem[]
   })
 
   const titleRef = useRef<HTMLHeadingElement>(null)
@@ -78,21 +93,118 @@ export default function CreatePurchasePage() {
 
   const loadData = async () => {
     try {
-      setLoading(true)
-      const [articlesData, suppliersData, unitsData] = await Promise.all([
+      if (isEditMode) {
+        setInitialLoading(true)
+      } else {
+        setLoading(true)
+      }
+
+      const promises = [
         DatabaseService.getArticles(),
         DatabaseService.getSuppliers(),
         DatabaseService.getUnits()
-      ])
+      ]
+
+      if (isEditMode && purchaseId) {
+        promises.push(DatabaseService.getPurchase(purchaseId) as any)
+      }
+
+      const results = await Promise.all(promises)
+      const [articlesData, suppliersData, unitsData, purchaseData] = results
+
       setArticles(articlesData || [])
       setSuppliers(suppliersData || [])
       setUnits(unitsData || [])
+
+      // Load purchase data if in edit mode
+      if (isEditMode && purchaseData) {
+        setFormData({
+          name: purchaseData.name || "",
+          description: purchaseData.description || "",
+          purchaseDate: purchaseData.purchase_date,
+          status: purchaseData.status || "paid"
+        })
+
+        setInitialData({
+          name: purchaseData.name || "",
+          description: purchaseData.description || "",
+          purchaseDate: purchaseData.purchase_date,
+          status: purchaseData.status || "paid",
+          supplierId: purchaseData.suppliers?.id || "",
+          items: []
+        })
+
+        if (purchaseData.suppliers) {
+          setSelectedSupplier(purchaseData.suppliers as Supplier)
+        }
+
+        // Load items
+        if (purchaseData.purchase_items && purchaseData.purchase_items.length > 0) {
+          const loadedItems: PurchaseItem[] = await Promise.all(
+            purchaseData.purchase_items.map(async (item: any) => {
+              const article = articlesData?.find((a: Article) => a.id === item.articles?.id)
+              const compatibleUnits = article ? getCompatibleUnitsForArticle(article, unitsData || []) : []
+              const itemUnit = unitsData?.find((u: Unit) => u.id === item.unit_info?.id || u.id === item.unit)
+
+              return {
+                id: item.id,
+                articleId: item.articles?.id || "",
+                articleName: item.articles?.name || "",
+                unit: itemUnit?.name || "",
+                unitId: itemUnit?.id || "",
+                unitSymbol: itemUnit?.symbol || "",
+                quantity: item.quantity || 0,
+                price: item.total_cost || 0,
+                total: item.total_cost || 0,
+                availableUnits: compatibleUnits
+              }
+            })
+          )
+
+          setItems(loadedItems)
+          setInitialData(prev => ({
+            ...prev,
+            items: JSON.parse(JSON.stringify(loadedItems))
+          }))
+        }
+      }
     } catch (error) {
       console.error("Error loading data:", error)
       toast.error("Error al cargar datos")
     } finally {
       setLoading(false)
+      setInitialLoading(false)
     }
+  }
+
+  const getCompatibleUnitsForArticle = (article: Article, allUnits: Unit[]): Unit[] => {
+    const articleUnitInfo = article.unit_info || article.default_unit_info
+    const articleUnitId = article.unit_id || article.default_unit_id
+
+    const baseUnit = allUnits.find(unit => unit.id === articleUnitId)
+
+    if (!articleUnitInfo?.category_id) {
+      return baseUnit ? [baseUnit] : []
+    }
+
+    let compatible = allUnits.filter(unit => unit.category_id === articleUnitInfo.category_id)
+
+    if (baseUnit) {
+      const exists = compatible.some(unit => unit.id === baseUnit.id)
+      if (!exists) {
+        compatible = [baseUnit, ...compatible]
+      } else {
+        compatible = [baseUnit, ...compatible.filter(unit => unit.id !== baseUnit.id)]
+      }
+    }
+
+    if (compatible.length === 0 && baseUnit) {
+      return [baseUnit]
+    }
+
+    const uniqueById = new Map<string, Unit>()
+    compatible.forEach(unit => uniqueById.set(unit.id, unit))
+    return Array.from(uniqueById.values())
   }
 
   const handleInputChange = (field: string, value: string) => {
@@ -220,6 +332,33 @@ export default function CreatePurchasePage() {
   const totalAmount = items.reduce((sum, item) => sum + item.total, 0)
   const totalItems = items.length
 
+  // Detect changes
+  const hasChanges = () => {
+    if (!isEditMode) return true // Always allow save in create mode
+
+    if (formData.name !== initialData.name) return true
+    if (formData.description !== initialData.description) return true
+    if (formData.purchaseDate !== initialData.purchaseDate) return true
+    if (formData.status !== initialData.status) return true
+    if (selectedSupplier?.id !== initialData.supplierId) return true
+    if (items.length !== initialData.items.length) return true
+
+    // Check if items have changed
+    for (let i = 0; i < items.length; i++) {
+      const currentItem = items[i]
+      const initialItem = initialData.items.find(item => item.id === currentItem.id)
+
+      if (!initialItem) return true
+
+      if (currentItem.articleId !== initialItem.articleId) return true
+      if (currentItem.quantity !== initialItem.quantity) return true
+      if (currentItem.price !== initialItem.price) return true
+      if (currentItem.unitId !== initialItem.unitId) return true
+    }
+
+    return false
+  }
+
   const handleSubmit = async () => {
     if (!formData.name.trim()) {
       toast.error("El nombre de la compra es obligatorio")
@@ -261,18 +400,61 @@ export default function CreatePurchasePage() {
         }))
       }
 
-      const purchase = await DatabaseService.createPurchase(purchaseData)
+      if (isEditMode && purchaseId) {
+        // Update mode
+        const { error: updateError } = await DatabaseService.supabase
+          .from('purchases')
+          .update({
+            name: purchaseData.name,
+            description: purchaseData.description,
+            supplier_id: purchaseData.supplier_id,
+            purchase_date: purchaseData.purchase_date,
+            total_amount: purchaseData.total_amount,
+            status: purchaseData.status
+          })
+          .eq('id', purchaseId)
 
-      // Actualizar stock de artículos
-      for (const item of items) {
-        await updateArticleStock(item)
+        if (updateError) throw updateError
+
+        // Delete old items
+        await DatabaseService.supabase
+          .from('purchase_items')
+          .delete()
+          .eq('purchase_id', purchaseId)
+
+        // Create new items
+        const purchaseItems = items.map(item => ({
+          purchase_id: purchaseId,
+          article_id: item.articleId,
+          quantity: item.quantity,
+          unit_id: item.unitId,
+          unit_cost: item.price,
+          total_cost: item.total
+        }))
+
+        const { error: itemsError } = await DatabaseService.supabase
+          .from('purchase_items')
+          .insert(purchaseItems)
+
+        if (itemsError) throw itemsError
+
+        toast.success("Compra actualizada exitosamente")
+      } else {
+        // Create mode
+        const purchase = await DatabaseService.createPurchase(purchaseData)
+
+        // Actualizar stock de artículos
+        for (const item of items) {
+          await updateArticleStock(item)
+        }
+
+        toast.success("Compra creada exitosamente")
       }
 
-      toast.success("Compra creada exitosamente")
       router.push("/purchases")
     } catch (error: any) {
-      console.error("Error creating purchase:", error)
-      toast.error(`Error al crear compra: ${error?.message || 'desconocido'}`)
+      console.error(`Error ${isEditMode ? 'updating' : 'creating'} purchase:`, error)
+      toast.error(`Error al ${isEditMode ? 'actualizar' : 'crear'} compra: ${error?.message || 'desconocido'}`)
     } finally {
       setLoading(false)
     }
@@ -321,8 +503,17 @@ export default function CreatePurchasePage() {
     formData.name.trim() &&
     selectedSupplier &&
     items.length > 0 &&
-    items.every(item => item.quantity > 0 && item.price > 0)
+    items.every(item => item.quantity > 0 && item.price > 0) &&
+    hasChanges()
   )
+
+  if (initialLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
+  }
 
   return (
     <>
@@ -518,7 +709,7 @@ export default function CreatePurchasePage() {
             </div>
             <div className="flex-1 text-center">
               <h2 className={`text-lg font-semibold transition-opacity duration-300 ${scrolled ? 'opacity-100' : 'opacity-0'}`}>
-                {formData.name || 'Crea una compra'}
+                {formData.name || (isEditMode ? 'Editar compra' : 'Crea una compra')}
               </h2>
             </div>
             <div className="flex-1 flex justify-end">
@@ -532,7 +723,7 @@ export default function CreatePurchasePage() {
                     : "bg-gray-300 text-gray-500 cursor-not-allowed"
                 )}
               >
-                {loading ? 'Guardando...' : 'Guardar'}
+                {loading ? (isEditMode ? 'Actualizando...' : 'Guardando...') : (isEditMode ? 'Actualizar' : 'Guardar')}
               </button>
             </div>
           </div>
@@ -542,16 +733,20 @@ export default function CreatePurchasePage() {
         <div className="max-w-4xl mx-auto bg-white">
           <div className="p-6">
             <h1 ref={titleRef} className="text-3xl font-semibold mb-6">
-              Crea una compra
+              {isEditMode ? 'Editar compra' : 'Crea una compra'}
             </h1>
 
             {/* Banner informativo */}
             <div className="bg-blue-50 p-4 rounded-lg flex items-center justify-between mb-8">
               <div className="flex items-center gap-3">
-                <span className="text-xl">📢</span>
-                <span className="text-sm">Crea compras detalladas que actualizarán automáticamente el inventario de productos</span>
+                <span className="text-xl">{isEditMode ? '📝' : '📢'}</span>
+                <span className="text-sm">
+                  {isEditMode
+                    ? 'Modifica los detalles de esta compra. Los cambios se guardarán al presionar "Actualizar"'
+                    : 'Crea compras detalladas que actualizarán automáticamente el inventario de productos'}
+                </span>
               </div>
-              <a href="#" className="text-blue-600 font-semibold text-sm hover:underline">Más información</a>
+              {!isEditMode && <a href="#" className="text-blue-600 font-semibold text-sm hover:underline">Más información</a>}
             </div>
 
             {/* Sección Información */}

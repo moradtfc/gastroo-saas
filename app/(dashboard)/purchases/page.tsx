@@ -95,12 +95,12 @@ export default function PurchasesPage() {
   }
 
   const handleView = (purchase: Purchase) => {
-    router.push(`/purchases/edit/${purchase.id}`)
+    router.push(`/purchases/${purchase.id}`)
     setOpenMenuId(null)
   }
 
   const handleEdit = (purchase: Purchase) => {
-    router.push(`/purchases/edit/${purchase.id}`)
+    router.push(`/purchases/${purchase.id}`)
     setOpenMenuId(null)
   }
 
@@ -324,7 +324,7 @@ export default function PurchasesPage() {
               >
                 <div className="col-span-3">
                   <button
-                    onClick={() => router.push(`/purchases/edit/${purchase.id}`)}
+                    onClick={() => router.push(`/purchases/${purchase.id}`)}
                     className="text-left font-semibold text-blue-600 hover:text-blue-800 hover:underline transition-colors cursor-pointer"
                   >
                     {purchase.name}
