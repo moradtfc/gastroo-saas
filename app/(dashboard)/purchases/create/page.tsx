@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Search, X, Trash2, ChevronDown } from "lucide-react"
+import { Search, X, Trash2, ChevronDown, Calendar } from "lucide-react"
 import Link from "next/link"
 
 interface Article {
@@ -179,9 +179,8 @@ export default function CreatePurchasePage() {
   const updateItemQuantity = (id: string, quantity: number) => {
     setItems(items.map(item => {
       if (item.id === id) {
-        const newQuantity = quantity
-        const newTotal = newQuantity * item.price
-        return { ...item, quantity: newQuantity, total: newTotal }
+        // Quantity is only for inventory update, doesn't change total
+        return { ...item, quantity: quantity }
       }
       return item
     }))
@@ -190,9 +189,8 @@ export default function CreatePurchasePage() {
   const updateItemPrice = (id: string, price: number) => {
     setItems(items.map(item => {
       if (item.id === id) {
-        const newPrice = price
-        const newTotal = item.quantity * newPrice
-        return { ...item, price: newPrice, total: newTotal }
+        // Price is the total, not unit price
+        return { ...item, price: price, total: price }
       }
       return item
     }))
@@ -288,7 +286,9 @@ export default function CreatePurchasePage() {
       const currentStock = article.current_stock || 0
       const currentPrice = article.cost_per_unit || 0
       let quantityToAdd = item.quantity
-      const newPrice = item.price
+
+      // Calculate unit price from total price and quantity
+      const unitPrice = item.quantity > 0 ? item.price / item.quantity : 0
 
       // Convertir cantidad a unidad base del artículo si es necesario
       const articleBaseUnitId = article.unit_id || article.default_unit_id
@@ -303,9 +303,9 @@ export default function CreatePurchasePage() {
 
       // Calcular precio promedio ponderado
       const totalCurrentValue = currentStock * currentPrice
-      const totalNewValue = quantityToAdd * newPrice
+      const totalNewValue = quantityToAdd * unitPrice
       const totalQuantity = currentStock + quantityToAdd
-      const averagePrice = totalQuantity > 0 ? (totalCurrentValue + totalNewValue) / totalQuantity : newPrice
+      const averagePrice = totalQuantity > 0 ? (totalCurrentValue + totalNewValue) / totalQuantity : unitPrice
 
       await DatabaseService.updateIngredient(item.articleId, {
         current_stock: totalQuantity,
@@ -578,12 +578,15 @@ export default function CreatePurchasePage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-2 uppercase">Fecha</label>
-                    <Input
-                      type="date"
-                      value={formData.purchaseDate}
-                      onChange={(e) => handleInputChange("purchaseDate", e.target.value)}
-                      className="w-full h-10 px-4 border border-gray-300 rounded-lg bg-white"
-                    />
+                    <div className="relative">
+                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                      <Input
+                        type="date"
+                        value={formData.purchaseDate}
+                        onChange={(e) => handleInputChange("purchaseDate", e.target.value)}
+                        className="w-full h-10 pl-10 pr-4 border border-gray-300 rounded-lg bg-white"
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -801,9 +804,9 @@ export default function CreatePurchasePage() {
                           </div>
                         </div>
 
-                        {/* Precio unitario */}
+                        {/* Precio total */}
                         <div className="col-span-3">
-                          <label className="block text-xs font-semibold text-gray-600 mb-1">Precio (€/{item.unitSymbol})</label>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">Precio Total (€)</label>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -829,6 +832,39 @@ export default function CreatePurchasePage() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Resumen de la compra */}
+              {items.length > 0 && (
+                <div className="mt-6 p-5 bg-gray-50 border border-gray-200 rounded-lg">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Resumen de la Compra</h3>
+
+                  {/* Desglose de artículos */}
+                  <div className="space-y-2 mb-4">
+                    {items.map((item) => (
+                      <div key={item.id} className="flex justify-between items-center text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-700">{item.articleName}</span>
+                          <span className="text-gray-500">
+                            ({item.quantity} {item.unitSymbol})
+                          </span>
+                        </div>
+                        <span className="font-semibold text-gray-900">€{item.total.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="border-t border-gray-300 pt-4 mt-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm text-gray-600">Total de artículos:</span>
+                      <span className="font-semibold text-gray-900">{items.length}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-base font-semibold text-gray-900">Total de la compra:</span>
+                      <span className="text-xl font-bold text-green-600">€{totalAmount.toFixed(2)}</span>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
