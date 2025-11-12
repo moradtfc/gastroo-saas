@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Search, X, Trash2 } from "lucide-react"
+import { Search, X, Trash2, ChevronDown } from "lucide-react"
 import Link from "next/link"
 
 interface Article {
@@ -35,6 +35,7 @@ interface PurchaseItem {
   quantity: number
   price: number
   total: number
+  availableUnits: Unit[]
 }
 
 export default function CreatePurchasePage() {
@@ -50,12 +51,13 @@ export default function CreatePurchasePage() {
   const [searchArticle, setSearchArticle] = useState("")
   const [selectedArticles, setSelectedArticles] = useState<Article[]>([])
   const [items, setItems] = useState<PurchaseItem[]>([])
+  const [openUnitSelect, setOpenUnitSelect] = useState<string | null>(null)
 
   const [formData, setFormData] = useState({
     name: "",
     description: "",
     purchaseDate: new Date().toISOString().split("T")[0],
-    status: "completed"
+    status: "paid"
   })
 
   const titleRef = useRef<HTMLHeadingElement>(null)
@@ -102,6 +104,36 @@ export default function CreatePurchasePage() {
     setIsSupplierModalOpen(false)
   }
 
+  const getCompatibleUnits = (article: Article): Unit[] => {
+    const articleUnitInfo = article.unit_info || article.default_unit_info
+    const articleUnitId = article.unit_id || article.default_unit_id
+
+    const baseUnit = units.find(unit => unit.id === articleUnitId)
+
+    if (!articleUnitInfo?.category_id) {
+      return baseUnit ? [baseUnit] : []
+    }
+
+    let compatible = units.filter(unit => unit.category_id === articleUnitInfo.category_id)
+
+    if (baseUnit) {
+      const exists = compatible.some(unit => unit.id === baseUnit.id)
+      if (!exists) {
+        compatible = [baseUnit, ...compatible]
+      } else {
+        compatible = [baseUnit, ...compatible.filter(unit => unit.id !== baseUnit.id)]
+      }
+    }
+
+    if (compatible.length === 0 && baseUnit) {
+      return [baseUnit]
+    }
+
+    const uniqueById = new Map<string, Unit>()
+    compatible.forEach(unit => uniqueById.set(unit.id, unit))
+    return Array.from(uniqueById.values())
+  }
+
   const addArticleFromModal = (article: Article) => {
     const isSelected = selectedArticles.some(a => a.id === article.id)
     const isInPurchase = items.some(item => item.articleId === article.id)
@@ -117,17 +149,20 @@ export default function CreatePurchasePage() {
 
   const saveSelectedArticles = () => {
     const newItems: PurchaseItem[] = selectedArticles.map(article => {
-      const unitInfo = article.unit_info || article.default_unit_info
+      const compatibleUnits = getCompatibleUnits(article)
+      const defaultUnit = compatibleUnits[0]
+
       return {
         id: Date.now().toString() + Math.random(),
         articleId: article.id,
         articleName: article.name,
-        unit: unitInfo?.name || article.unit || 'unidad',
-        unitId: unitInfo?.id || article.unit_id || '',
-        unitSymbol: unitInfo?.symbol || article.unit || 'ud',
+        unit: defaultUnit?.name || 'unidad',
+        unitId: defaultUnit?.id || '',
+        unitSymbol: defaultUnit?.symbol || 'ud',
         quantity: 0,
         price: 0,
-        total: 0
+        total: 0,
+        availableUnits: compatibleUnits
       }
     })
 
@@ -158,6 +193,23 @@ export default function CreatePurchasePage() {
         const newPrice = price
         const newTotal = item.quantity * newPrice
         return { ...item, price: newPrice, total: newTotal }
+      }
+      return item
+    }))
+  }
+
+  const updateItemUnit = (id: string, unitId: string) => {
+    setItems(items.map(item => {
+      if (item.id === id) {
+        const selectedUnit = item.availableUnits.find(u => u.id === unitId)
+        if (selectedUnit) {
+          return {
+            ...item,
+            unitId: selectedUnit.id,
+            unit: selectedUnit.name,
+            unitSymbol: selectedUnit.symbol
+          }
+        }
       }
       return item
     }))
@@ -530,7 +582,7 @@ export default function CreatePurchasePage() {
                       type="date"
                       value={formData.purchaseDate}
                       onChange={(e) => handleInputChange("purchaseDate", e.target.value)}
-                      className="w-full h-10 px-4 border border-gray-300 rounded-lg"
+                      className="w-full h-10 px-4 border border-gray-300 rounded-lg bg-white"
                     />
                   </div>
 
@@ -539,10 +591,10 @@ export default function CreatePurchasePage() {
                     <select
                       value={formData.status}
                       onChange={(e) => handleInputChange("status", e.target.value)}
-                      className="w-full h-10 px-4 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full h-10 px-4 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                     >
-                      <option value="completed">Completada</option>
-                      <option value="pending">Pendiente</option>
+                      <option value="paid">Pagado</option>
+                      <option value="unpaid">Por Pagar</option>
                     </select>
                   </div>
                 </div>
@@ -663,7 +715,6 @@ export default function CreatePurchasePage() {
                       <div className="flex items-center gap-3 mb-3">
                         <div className="flex-1">
                           <span className="font-semibold text-gray-900 block">{item.articleName}</span>
-                          <span className="text-xs text-gray-500">Unidad: {item.unitSymbol}</span>
                         </div>
                         <button
                           onClick={() => removeItem(item.id)}
@@ -675,7 +726,7 @@ export default function CreatePurchasePage() {
 
                       <div className="grid grid-cols-12 gap-3 items-end">
                         {/* Cantidad */}
-                        <div className="col-span-4">
+                        <div className="col-span-3">
                           <label className="block text-xs font-semibold text-gray-600 mb-1">Cantidad</label>
                           <input
                             type="text"
@@ -692,8 +743,66 @@ export default function CreatePurchasePage() {
                           />
                         </div>
 
+                        {/* Unidad */}
+                        <div className="col-span-3">
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">Unidad</label>
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => setOpenUnitSelect(openUnitSelect === item.id ? null : item.id)}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-left flex items-center justify-between hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
+                            >
+                              <span className={item.unitId ? 'text-gray-900' : 'text-gray-400'}>
+                                {item.unitId
+                                  ? `${item.unitSymbol} - ${item.unit}`
+                                  : 'Seleccionar unidad'}
+                              </span>
+                              <ChevronDown
+                                className={`w-4 h-4 text-gray-400 transition-transform ${openUnitSelect === item.id ? 'rotate-180' : ''}`}
+                              />
+                            </button>
+
+                            {openUnitSelect === item.id && item.availableUnits && item.availableUnits.length > 0 && (
+                              <div className="absolute z-50 w-full mt-2 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                                <div className="max-h-60 overflow-y-auto">
+                                  {item.availableUnits
+                                    .sort((a: Unit, b: Unit) => {
+                                      if (a.base_unit) return -1
+                                      if (b.base_unit) return 1
+                                      return (a.conversion_factor || 0) - (b.conversion_factor || 0)
+                                    })
+                                    .map((unit: Unit) => (
+                                      <button
+                                        key={unit.id}
+                                        type="button"
+                                        onClick={() => {
+                                          updateItemUnit(item.id, unit.id)
+                                          setOpenUnitSelect(null)
+                                        }}
+                                        className={`w-full px-4 py-2.5 text-left hover:bg-gray-50 transition-colors text-sm ${
+                                          item.unitId === unit.id
+                                            ? 'bg-blue-50 text-blue-600 font-medium'
+                                            : 'text-gray-700'
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <span>
+                                            <span className="font-semibold">{unit.symbol}</span> - {unit.name}
+                                          </span>
+                                          {unit.base_unit && (
+                                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">Base</span>
+                                          )}
+                                        </div>
+                                      </button>
+                                    ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
                         {/* Precio unitario */}
-                        <div className="col-span-4">
+                        <div className="col-span-3">
                           <label className="block text-xs font-semibold text-gray-600 mb-1">Precio (€/{item.unitSymbol})</label>
                           <input
                             type="text"
@@ -711,7 +820,7 @@ export default function CreatePurchasePage() {
                         </div>
 
                         {/* Total */}
-                        <div className="col-span-4">
+                        <div className="col-span-3">
                           <label className="block text-xs font-semibold text-gray-600 mb-1">Total (€)</label>
                           <div className="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg text-sm font-semibold text-gray-900">
                             €{item.total.toFixed(2)}

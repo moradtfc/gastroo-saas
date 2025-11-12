@@ -104,10 +104,12 @@ export default function PurchasesPage() {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
+      case "paid":
       case "completed":
-        return <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full font-medium">Completada</span>
+        return <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full font-medium">Pagado</span>
+      case "unpaid":
       case "pending":
-        return <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-medium">Pendiente</span>
+        return <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-medium">Por Pagar</span>
       case "cancelled":
         return <span className="px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full font-medium">Cancelada</span>
       default:
@@ -117,8 +119,8 @@ export default function PurchasesPage() {
 
   const getStatusLabel = () => {
     if (statusFilter === "all") return "Todos los estados"
-    if (statusFilter === "completed") return "Completadas"
-    if (statusFilter === "pending") return "Pendientes"
+    if (statusFilter === "paid" || statusFilter === "completed") return "Pagadas"
+    if (statusFilter === "unpaid" || statusFilter === "pending") return "Por Pagar"
     if (statusFilter === "cancelled") return "Canceladas"
     return "Todos los estados"
   }
@@ -134,10 +136,10 @@ export default function PurchasesPage() {
   // Cálculos de estadísticas
   const totalPurchases = purchases.length
   const totalSpent = purchases.reduce((sum, purchase) => sum + (purchase.total_amount || 0), 0)
-  const completedPurchases = purchases.filter((purchase) => purchase.status === "completed").length
+  const completedPurchases = purchases.filter((purchase) => purchase.status === "paid" || purchase.status === "completed").length
   const paidPercentage = totalPurchases > 0 ? ((completedPurchases / totalPurchases) * 100).toFixed(1) : "0.0"
   const pendingAmount = purchases
-    .filter((purchase) => purchase.status === "pending")
+    .filter((purchase) => purchase.status === "unpaid" || purchase.status === "pending")
     .reduce((sum, purchase) => sum + (purchase.total_amount || 0), 0)
 
   if (loading) {
@@ -236,27 +238,27 @@ export default function PurchasesPage() {
                 </button>
                 <button
                   onClick={() => {
-                    setStatusFilter("completed")
+                    setStatusFilter("paid")
                     setOpenStatusMenu(false)
                   }}
                   className={cn(
                     "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer",
-                    statusFilter === "completed" && "bg-blue-50 text-blue-600 font-medium"
+                    (statusFilter === "paid" || statusFilter === "completed") && "bg-blue-50 text-blue-600 font-medium"
                   )}
                 >
-                  Completadas
+                  Pagadas
                 </button>
                 <button
                   onClick={() => {
-                    setStatusFilter("pending")
+                    setStatusFilter("unpaid")
                     setOpenStatusMenu(false)
                   }}
                   className={cn(
                     "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer",
-                    statusFilter === "pending" && "bg-blue-50 text-blue-600 font-medium"
+                    (statusFilter === "unpaid" || statusFilter === "pending") && "bg-blue-50 text-blue-600 font-medium"
                   )}
                 >
-                  Pendientes
+                  Por Pagar
                 </button>
                 <button
                   onClick={() => {
