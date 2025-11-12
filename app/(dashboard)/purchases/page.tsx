@@ -323,12 +323,12 @@ export default function PurchasesPage() {
                 className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 hover:bg-gray-50 items-center transition-colors"
               >
                 <div className="col-span-3">
-                  <button
-                    onClick={() => router.push(`/purchases/${purchase.id}`)}
-                    className="text-left font-semibold text-blue-600 hover:text-blue-800 hover:underline transition-colors cursor-pointer"
+                  <Link
+                    href={`/purchases/${purchase.id}`}
+                    className="font-semibold text-blue-600 hover:text-blue-800 hover:underline transition-colors"
                   >
                     {purchase.name}
-                  </button>
+                  </Link>
                 </div>
 
                 <div className="col-span-2 flex items-center gap-2 text-gray-700">
