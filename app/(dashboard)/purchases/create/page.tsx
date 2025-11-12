@@ -1,29 +1,24 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Trash2, Calendar, Package, CheckCircle, ArrowLeft, Search } from "lucide-react"
-import Link from "next/link"
 import { DatabaseService, type Supplier, type Unit } from "@/lib/database"
 import { toast } from "sonner"
-import { SuccessModal } from "@/components/ui/success-modal"
+import { cn } from "@/lib/utils"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Search, X, Trash2 } from "lucide-react"
+import Link from "next/link"
 
-interface Ingredient {
+interface Article {
   id: string
   name: string
   category?: string
   current_stock?: number
   cost_per_unit?: number
-  unit: string // legacy fallback
+  unit: string
   unit_id?: string
   default_unit_id?: string
   unit_info?: Unit
@@ -32,8 +27,8 @@ interface Ingredient {
 
 interface PurchaseItem {
   id: string
-  ingredientId: string
-  ingredientName: string
+  articleId: string
+  articleName: string
   unit: string
   unitId: string
   unitSymbol: string
@@ -43,315 +38,172 @@ interface PurchaseItem {
 }
 
 export default function CreatePurchasePage() {
-  console.log("[v0] CreatePurchasePage rendering - Purchases creation form")
-
   const router = useRouter()
-  const [ingredients, setIngredients] = useState<Ingredient[]>([])
+  const [loading, setLoading] = useState(false)
+  const [scrolled, setScrolled] = useState(false)
+  const [articles, setArticles] = useState<Article[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [units, setUnits] = useState<Unit[]>([])
-  const [loading, setLoading] = useState(true)
-  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split("T")[0])
-  const [notes, setNotes] = useState("")
-  const [status, setStatus] = useState("completed")
-  const [selectedSupplier, setSelectedSupplier] = useState("")
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null)
+  const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false)
+  const [isArticleModalOpen, setIsArticleModalOpen] = useState(false)
+  const [searchArticle, setSearchArticle] = useState("")
+  const [selectedArticles, setSelectedArticles] = useState<Article[]>([])
   const [items, setItems] = useState<PurchaseItem[]>([])
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  
-  // Success modal state
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
-  const [successData, setSuccessData] = useState<any>(null)
 
+  const [formData, setFormData] = useState({
+    name: "",
+    description: "",
+    purchaseDate: new Date().toISOString().split("T")[0],
+    status: "completed"
+  })
 
-  // Form state for adding new item
-  const [selectedIngredient, setSelectedIngredient] = useState("")
-  const [selectedUnit, setSelectedUnit] = useState("")
-  const [quantity, setQuantity] = useState("")
-  const [price, setPrice] = useState("")
-  const [ingredientSearchTerm, setIngredientSearchTerm] = useState("")
-  const [unitSearchTerm, setUnitSearchTerm] = useState("")
+  const titleRef = useRef<HTMLHeadingElement>(null)
 
   useEffect(() => {
     loadData()
-  }, [])
 
-  // Reset unit selection when ingredient changes
-  useEffect(() => {
-    setSelectedUnit("")
-  }, [selectedIngredient])
+    const handleScroll = () => {
+      if (titleRef.current) {
+        const titlePosition = titleRef.current.getBoundingClientRect()
+        setScrolled(titlePosition.bottom < 80)
+      }
+    }
+
+    window.addEventListener("scroll", handleScroll)
+    return () => window.removeEventListener("scroll", handleScroll)
+  }, [])
 
   const loadData = async () => {
     try {
       setLoading(true)
-      const [ingredientsData, suppliersData, unitsData] = await Promise.all([
-        DatabaseService.getIngredients(),
+      const [articlesData, suppliersData, unitsData] = await Promise.all([
+        DatabaseService.getArticles(),
         DatabaseService.getSuppliers(),
         DatabaseService.getUnits()
       ])
-      setIngredients(ingredientsData || [])
+      setArticles(articlesData || [])
       setSuppliers(suppliersData || [])
       setUnits(unitsData || [])
-      console.log('Loaded data:', {
-        ingredients: ingredientsData?.length,
-        suppliers: suppliersData?.length,
-        units: unitsData?.length
-      })
-      if (ingredientsData && ingredientsData.length > 0) {
-        toast.success(`${ingredientsData.length} ingredientes, ${suppliersData?.length || 0} proveedores y ${unitsData?.length || 0} unidades cargados`)
-      }
     } catch (error) {
-      console.error('Error loading data:', error)
-      toast.error('Error al cargar datos')
+      console.error("Error loading data:", error)
+      toast.error("Error al cargar datos")
     } finally {
       setLoading(false)
     }
   }
 
-  const addItem = async () => {
-    if (!selectedIngredient || !selectedUnit || !quantity || !price) {
-      toast.error("Por favor completa todos los campos del artículo")
-      return
+  const handleInputChange = (field: string, value: string) => {
+    setFormData((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const handleSupplierSelect = (supplier: Supplier) => {
+    setSelectedSupplier(supplier)
+    setIsSupplierModalOpen(false)
+  }
+
+  const addArticleFromModal = (article: Article) => {
+    const isSelected = selectedArticles.some(a => a.id === article.id)
+    const isInPurchase = items.some(item => item.articleId === article.id)
+
+    if (!isSelected && !isInPurchase) {
+      setSelectedArticles(prev => [...prev, article])
     }
+  }
 
-    const ingredient = ingredients.find((i) => i.id === selectedIngredient)
-    const selectedUnitInfo = units.find((u) => u.id === selectedUnit)
+  const removeSelectedArticle = (articleId: string) => {
+    setSelectedArticles(prev => prev.filter(a => a.id !== articleId))
+  }
 
-    if (!ingredient || !selectedUnitInfo) {
-      toast.error("Ingrediente o unidad no encontrados")
-      return
-    }
+  const saveSelectedArticles = () => {
+    const newItems: PurchaseItem[] = selectedArticles.map(article => {
+      const unitInfo = article.unit_info || article.default_unit_info
+      return {
+        id: Date.now().toString() + Math.random(),
+        articleId: article.id,
+        articleName: article.name,
+        unit: unitInfo?.name || article.unit || 'unidad',
+        unitId: unitInfo?.id || article.unit_id || '',
+        unitSymbol: unitInfo?.symbol || article.unit || 'ud',
+        quantity: 0,
+        price: 0,
+        total: 0
+      }
+    })
 
-    // Since we now only show compatible units, no need for conversion validation
-
-    const totalPrice = Number.parseFloat(price)
-    const quantityValue = Number.parseFloat(quantity)
-
-    const newItem: PurchaseItem = {
-      id: Date.now().toString(),
-      ingredientId: ingredient.id,
-      ingredientName: ingredient.name,
-      unit: selectedUnitInfo.name,
-      unitId: selectedUnitInfo.id,
-      unitSymbol: selectedUnitInfo.symbol,
-      quantity: quantityValue,
-      price: totalPrice / quantityValue, // Precio unitario calculado
-      total: totalPrice, // El precio introducido es el total
-    }
-
-    setItems([...items, newItem])
-
-    // Reset form
-    setSelectedIngredient("")
-    setSelectedUnit("")
-    setQuantity("")
-    setPrice("")
-    
-    toast.success(`${ingredient.name} agregado a la compra`)
+    setItems(prev => [...prev, ...newItems])
+    setSelectedArticles([])
+    setIsArticleModalOpen(false)
+    toast.success(`${newItems.length} artículo(s) añadido(s)`)
   }
 
   const removeItem = (id: string) => {
-    setItems(items.filter((item) => item.id !== id))
+    setItems(items.filter(item => item.id !== id))
   }
+
+  const updateItemQuantity = (id: string, quantity: number) => {
+    setItems(items.map(item => {
+      if (item.id === id) {
+        const newQuantity = quantity
+        const newTotal = newQuantity * item.price
+        return { ...item, quantity: newQuantity, total: newTotal }
+      }
+      return item
+    }))
+  }
+
+  const updateItemPrice = (id: string, price: number) => {
+    setItems(items.map(item => {
+      if (item.id === id) {
+        const newPrice = price
+        const newTotal = item.quantity * newPrice
+        return { ...item, price: newPrice, total: newTotal }
+      }
+      return item
+    }))
+  }
+
+  const filteredArticles = articles.filter(article =>
+    article.name.toLowerCase().includes(searchArticle.toLowerCase())
+  )
 
   const totalAmount = items.reduce((sum, item) => sum + item.total, 0)
   const totalItems = items.length
 
-  // Filter ingredients based on search term
-  const getFilteredIngredients = () => {
-    let filtered = []
-    
-    if (!ingredientSearchTerm.trim()) {
-      // Show only first 2 ingredients alphabetically when no search
-      filtered = ingredients.slice(0, 2)
-    } else {
-      // Filter ingredients that match the search term
-      filtered = ingredients.filter(ingredient =>
-        ingredient.name.toLowerCase().includes(ingredientSearchTerm.toLowerCase())
-      )
-    }
-    
-    // Always include the selected ingredient if it's not already in the filtered list
-    if (selectedIngredient) {
-      const selectedIngredientObj = ingredients.find(i => i.id === selectedIngredient)
-      if (selectedIngredientObj && !filtered.find(i => i.id === selectedIngredient)) {
-        filtered = [selectedIngredientObj, ...filtered]
-      }
-    }
-    
-    return filtered
-  }
-
-  const filteredIngredients = getFilteredIngredients()
-
-  // Get compatible units for selected ingredient
-  const getCompatibleUnits = () => {
-    if (!selectedIngredient) return []
-    
-    const ingredient = ingredients.find(i => i.id === selectedIngredient)
-    if (!ingredient) return []
-    
-    const ingredientUnitInfo = ingredient.unit_info || ingredient.default_unit_info
-    const ingredientUnitId = ingredient.unit_id || ingredient.default_unit_id
-
-    const baseUnit = units.find(unit => unit.id === ingredientUnitId)
-
-    if (!ingredientUnitInfo?.category_id) {
-      return baseUnit ? [baseUnit] : []
+  const handleSubmit = async () => {
+    if (!formData.name.trim()) {
+      toast.error("El nombre de la compra es obligatorio")
+      return
     }
 
-    let compatible = units.filter(unit => unit.category_id === ingredientUnitInfo.category_id)
-
-    if (baseUnit) {
-      const exists = compatible.some(unit => unit.id === baseUnit.id)
-      if (!exists) {
-        compatible = [baseUnit, ...compatible]
-      } else {
-        // Move base unit to the front for prioridad
-        compatible = [baseUnit, ...compatible.filter(unit => unit.id !== baseUnit.id)]
-      }
+    if (!selectedSupplier) {
+      toast.error("Debes seleccionar un proveedor")
+      return
     }
-
-    if (compatible.length === 0 && baseUnit) {
-      return [baseUnit]
-    }
-
-    // Remove posibles duplicados conservando el orden
-    const uniqueById = new Map<string, Unit>()
-    compatible.forEach(unit => uniqueById.set(unit.id, unit))
-    return Array.from(uniqueById.values())
-  }
-
-  const compatibleUnits = getCompatibleUnits()
-
-  // Filter units based on search term
-  const getFilteredUnits = () => {
-    if (compatibleUnits.length === 0) return []
-
-    const matchesSearch = compatibleUnits.filter(unit =>
-      unit.name.toLowerCase().includes(unitSearchTerm.toLowerCase()) ||
-      unit.symbol.toLowerCase().includes(unitSearchTerm.toLowerCase())
-    )
-
-    if (unitSearchTerm.trim()) {
-      return matchesSearch
-    }
-
-    const baseList = compatibleUnits.slice(0, 5)
-    if (selectedUnit) {
-      const selectedInfo = compatibleUnits.find(unit => unit.id === selectedUnit)
-      if (selectedInfo && !baseList.some(unit => unit.id === selectedInfo.id)) {
-        baseList.unshift(selectedInfo)
-      }
-    }
-
-    // Eliminar duplicados manteniendo el orden
-    const uniqueById = new Map<string, Unit>()
-    baseList.forEach(unit => uniqueById.set(unit.id, unit))
-    return Array.from(uniqueById.values())
-  }
-
-  const filteredUnits = getFilteredUnits()
-
-  // Get dynamic placeholder for quantity field
-  const getQuantityPlaceholder = () => {
-    if (!selectedUnit) {
-      if (!selectedIngredient) return "Selecciona un ingrediente"
-      const ingredient = ingredients.find(i => i.id === selectedIngredient)
-      const unitInfo = ingredient?.unit_info || ingredient?.default_unit_info
-      return unitInfo ? `Introduce la cantidad (${unitInfo.symbol})` : "Introduce la cantidad"
-    }
-    const selectedUnitInfo = units.find(u => u.id === selectedUnit)
-    return selectedUnitInfo ? `Introduce la cantidad (${selectedUnitInfo.symbol})` : "Introduce la cantidad"
-  }
-
-  const updateIngredientStock = async (item: PurchaseItem) => {
-    try {
-      const ingredient = ingredients.find(i => i.id === item.ingredientId)
-      if (!ingredient) {
-        console.warn(`Ingredient with ID ${item.ingredientId} not found in local state`)
-        return
-      }
-
-      const currentStock = ingredient.current_stock || 0
-      const currentPrice = ingredient.cost_per_unit || 0
-      let quantityToAdd = item.quantity
-      const newPrice = item.price
-
-      console.log(`Updating ${ingredient.name}: Current stock: ${currentStock}, Adding: ${item.quantity} ${item.unitSymbol}`)
-
-      // Convert quantity to ingredient's base unit if necessary
-    const ingredientBaseUnitId = ingredient.unit_id || ingredient.default_unit_id
-    
-    if (ingredientBaseUnitId && item.unitId !== ingredientBaseUnitId) {
-      console.log(`Converting ${item.quantity} from unit ${item.unitId} to base unit ${ingredientBaseUnitId}`)
-      
-      const conversion = await DatabaseService.convertUnits(item.quantity, item.unitId, ingredientBaseUnitId)
-        
-        if (conversion.success && conversion.convertedValue !== undefined) {
-          quantityToAdd = conversion.convertedValue
-          console.log(`✅ Conversion successful: ${item.quantity} ${item.unitSymbol} = ${quantityToAdd} (base unit)`)
-        } else {
-          console.warn(`⚠️ Could not convert units for ${ingredient.name}, using original quantity`)
-          console.warn(`Conversion error: ${conversion.error}`)
-        }
-      }
-
-      // Calculate weighted average price using the converted quantity
-      const totalCurrentValue = currentStock * currentPrice
-      const totalNewValue = quantityToAdd * newPrice // Use converted quantity for value calculation
-      const totalQuantity = currentStock + quantityToAdd
-      const averagePrice = totalQuantity > 0 ? (totalCurrentValue + totalNewValue) / totalQuantity : newPrice
-
-      console.log(`Price calculation: (${currentStock} × ${currentPrice}) + (${quantityToAdd} × ${newPrice}) = ${totalCurrentValue + totalNewValue} ÷ ${totalQuantity} = ${averagePrice.toFixed(2)}`)
-
-      // Update ingredient in database
-      await DatabaseService.updateIngredient(item.ingredientId, {
-        current_stock: totalQuantity,
-        cost_per_unit: averagePrice
-      })
-
-      console.log(`✅ Updated ${ingredient.name}: Stock ${currentStock} + ${quantityToAdd} = ${totalQuantity}, Price: ${averagePrice.toFixed(2)}€`)
-    } catch (error: any) {
-      console.error(`Error updating ingredient stock for ${item.ingredientName}:`, error)
-      throw new Error(`Error al actualizar stock de ${item.ingredientName}: ${error.message}`)
-    }
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    console.log("[v0] Submitting purchase creation form")
 
     if (items.length === 0) {
       toast.error("Debes agregar al menos un artículo a la compra")
       return
     }
 
-    setIsSubmitting(true)
+    const hasValidItems = items.every(item => item.quantity > 0 && item.price > 0)
+    if (!hasValidItems) {
+      toast.error("Todos los artículos deben tener cantidad y precio válidos")
+      return
+    }
 
     try {
-      console.log('Starting purchase creation process...')
-      console.log('Items to process:', items)
-      console.log('Total amount:', totalAmount)
-      
-      // Validate form data
-      if (!purchaseDate) {
-        toast.error('La fecha de compra es requerida')
-        return
-      }
-      
-      if (totalAmount <= 0) {
-        toast.error('El monto total debe ser mayor a 0')
-        return
-      }
+      setLoading(true)
 
-      // Prepare purchase data for database
       const purchaseData = {
-        supplier_id: selectedSupplier || undefined,
-        purchase_date: purchaseDate,
+        name: formData.name.trim(),
+        description: formData.description.trim() || undefined,
+        supplier_id: selectedSupplier.id,
+        purchase_date: formData.purchaseDate,
         total_amount: totalAmount,
-        status: status,
-        notes: notes || undefined,
+        status: formData.status,
         items: items.map(item => ({
-          article_id: item.ingredientId,
+          article_id: item.articleId,
           quantity: item.quantity,
           unit: item.unitId,
           unit_cost: item.price,
@@ -359,450 +211,521 @@ export default function CreatePurchasePage() {
         }))
       }
 
-      console.log('Purchase data prepared:', purchaseData)
-
-      // Create purchase in database
-      toast.info('Creando compra en la base de datos...')
       const purchase = await DatabaseService.createPurchase(purchaseData)
-      console.log('Purchase created:', purchase)
-      
-      // Update ingredient stocks and prices
-      toast.info('Actualizando stock de ingredientes...')
+
+      // Actualizar stock de artículos
       for (const item of items) {
-        await updateIngredientStock(item)
+        await updateArticleStock(item)
       }
 
-      // Prepare success modal data
-      const supplier = suppliers.find(s => s.id === selectedSupplier)
-      const supplierName = supplier?.name || 'Sin proveedor'
-      setSuccessData({
-        purchase,
-        totalItems,
-        totalAmount,
-        supplier: supplierName,
-        date: new Date(purchaseDate).toLocaleDateString('es-ES'),
-        itemsUpdated: items.map(item => item.ingredientName),
-        stockUpdated: true,
-        expenseCreated: true
-      })
-      
-      setShowSuccessModal(true)
-      
-      // Reset form
-      setPurchaseDate(new Date().toISOString().split("T")[0])
-      setNotes("")
-      setStatus("completed")
-      setSelectedSupplier("")
-      setItems([])
-      
-      toast.success('¡Compra creada exitosamente!')
+      toast.success("Compra creada exitosamente")
+      router.push("/purchases")
     } catch (error: any) {
-      console.error('Error creating purchase:', error)
-      
-      // Show specific error message
-      const errorMessage = error.message || 'Error desconocido al crear la compra'
-      toast.error(`Error: ${errorMessage}`)
-      
-      // Additional debugging info
-      if (error.message?.includes('Ingrediente con ID')) {
-        toast.error('Problema con los ingredientes. Recarga la página e intenta de nuevo.')
-      } else if (error.message?.includes('supplier_id')) {
-        toast.error('Problema con el proveedor seleccionado.')
-      } else if (error.message?.includes('purchase_date')) {
-        toast.error('Problema con la fecha de compra.')
-      }
+      console.error("Error creating purchase:", error)
+      toast.error(`Error al crear compra: ${error?.message || 'desconocido'}`)
     } finally {
-      setIsSubmitting(false)
+      setLoading(false)
     }
   }
 
+  const updateArticleStock = async (item: PurchaseItem) => {
+    try {
+      const article = articles.find(a => a.id === item.articleId)
+      if (!article) return
+
+      const currentStock = article.current_stock || 0
+      const currentPrice = article.cost_per_unit || 0
+      let quantityToAdd = item.quantity
+      const newPrice = item.price
+
+      // Convertir cantidad a unidad base del artículo si es necesario
+      const articleBaseUnitId = article.unit_id || article.default_unit_id
+
+      if (articleBaseUnitId && item.unitId !== articleBaseUnitId) {
+        const conversion = await DatabaseService.convertUnits(item.quantity, item.unitId, articleBaseUnitId)
+
+        if (conversion.success && conversion.convertedValue !== undefined) {
+          quantityToAdd = conversion.convertedValue
+        }
+      }
+
+      // Calcular precio promedio ponderado
+      const totalCurrentValue = currentStock * currentPrice
+      const totalNewValue = quantityToAdd * newPrice
+      const totalQuantity = currentStock + quantityToAdd
+      const averagePrice = totalQuantity > 0 ? (totalCurrentValue + totalNewValue) / totalQuantity : newPrice
+
+      await DatabaseService.updateIngredient(item.articleId, {
+        current_stock: totalQuantity,
+        cost_per_unit: averagePrice
+      })
+    } catch (error) {
+      console.error(`Error updating article stock for ${item.articleName}:`, error)
+      throw new Error(`Error al actualizar stock de ${item.articleName}`)
+    }
+  }
+
+  const canSave = !!(
+    formData.name.trim() &&
+    selectedSupplier &&
+    items.length > 0 &&
+    items.every(item => item.quantity > 0 && item.price > 0)
+  )
+
   return (
-    <div className="space-y-6 p-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Link href="/purchases">
-          <Button variant="outline" size="sm">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Volver
-          </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
-            Nueva Compra
-          </h1>
-          <p className="text-muted-foreground">Agrega ingredientes e insumos al inventario</p>
-        </div>
-      </div>
+    <>
+      {/* Modal de búsqueda de artículos */}
+      <Dialog open={isArticleModalOpen} onOpenChange={(open) => {
+        setIsArticleModalOpen(open)
+        if (!open) {
+          setSelectedArticles([])
+          setSearchArticle('')
+        }
+      }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-xl">Añadir Artículos</DialogTitle>
+            <p className="text-sm text-gray-600 mt-1">Busca y añade artículos de tu inventario</p>
+          </DialogHeader>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Form */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Basic Information */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Calendar className="w-5 h-5" />
-                  Información Básica
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <Label htmlFor="purchaseDate">Fecha de Compra *</Label>
-                    <Input
-                      id="purchaseDate"
-                      type="date"
-                      value={purchaseDate}
-                      onChange={(e) => setPurchaseDate(e.target.value)}
-                      required
-                    />
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="supplier">Proveedor *</Label>
-                    <Select value={selectedSupplier} onValueChange={setSelectedSupplier}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona un proveedor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {suppliers.length === 0 ? (
-                          <SelectItem value="no-suppliers" disabled>
-                            No hay proveedores disponibles
-                          </SelectItem>
-                        ) : (
-                          suppliers.map((supplier) => (
-                            <SelectItem key={supplier.id} value={supplier.id}>
-                              <div className="flex flex-col">
-                                <span className="font-medium">{supplier.name}</span>
-                                {supplier.phone && (
-                                  <span className="text-xs text-muted-foreground">{supplier.phone}</span>
-                                )}
-                              </div>
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="status">Estado *</Label>
-                    <Select value={status} onValueChange={setStatus}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona el estado" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="completed">Completado</SelectItem>
-                        <SelectItem value="pending">Pendiente</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div>
-                  <Label htmlFor="notes">Notas Adicionales</Label>
-                  <Textarea
-                    id="notes"
-                    placeholder="Describe la compra, observaciones especiales, etc."
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={3}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Add Items */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Plus className="w-5 h-5" />
-                  Agregar Artículos
-                </CardTitle>
-                <CardDescription>Selecciona ingredientes, cantidades y proveedores</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Primera fila: Ingrediente y Unidad */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="ingredient" className="text-sm font-medium">Ingrediente *</Label>
-                    
-                    {/* Select de ingredientes con búsqueda interna */}
-                    <Select value={selectedIngredient} onValueChange={(value) => {
-                      setSelectedIngredient(value)
-                      setIngredientSearchTerm("") // Limpiar búsqueda al seleccionar
-                    }}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Selecciona un ingrediente">
-                          {selectedIngredient && (() => {
-                            const ingredient = ingredients.find(i => i.id === selectedIngredient)
-                            return ingredient ? ingredient.name : "Selecciona un ingrediente"
-                          })()}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {/* Campo de búsqueda dentro del dropdown */}
-                        <div className="p-2 border-b">
-                          <div className="relative">
-                            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input
-                              type="text"
-                              placeholder="Buscar ingrediente..."
-                              value={ingredientSearchTerm}
-                              onChange={(e) => {
-                                e.stopPropagation()
-                                setIngredientSearchTerm(e.target.value)
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              className="w-full h-8 pl-8"
-                            />
-                          </div>
-                        </div>
-                        
-                        {loading ? (
-                          <div className="p-2 text-center text-muted-foreground">Cargando ingredientes...</div>
-                        ) : filteredIngredients.length === 0 ? (
-                          <div className="p-2 text-center text-muted-foreground">
-                            {ingredientSearchTerm.trim() ? 'No se encontraron ingredientes' : 'No hay ingredientes disponibles'}
-                          </div>
-                        ) : (
-                          filteredIngredients.map((ingredient) => (
-                            <SelectItem key={ingredient.id} value={ingredient.id}>
-                              <div className="flex flex-col">
-                                <span className="font-medium">{ingredient.name}</span>
-                                <span className="text-xs text-muted-foreground">
-                                  Stock actual: {ingredient.current_stock || 0} {ingredient.unit}
-                                  {ingredient.category && ` • ${ingredient.category}`}
-                                </span>
-                              </div>
-                            </SelectItem>
-                          ))
-                        )}
-                        
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="unit" className="text-sm font-medium">Unidad *</Label>
-                    <Select value={selectedUnit} onValueChange={(value) => {
-                      setSelectedUnit(value)
-                      setUnitSearchTerm("") // Limpiar búsqueda al seleccionar
-                    }}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Selecciona la unidad" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {/* Campo de búsqueda dentro del dropdown */}
-                        <div className="p-2 border-b">
-                          <div className="relative">
-                            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input
-                              type="text"
-                              placeholder="Buscar unidad..."
-                              value={unitSearchTerm}
-                              onChange={(e) => {
-                                e.stopPropagation()
-                                setUnitSearchTerm(e.target.value)
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              className="w-full h-8 pl-8"
-                            />
-                          </div>
-                        </div>
-                        
-                        {loading ? (
-                          <SelectItem value="loading" disabled>
-                            Cargando unidades...
-                          </SelectItem>
-                        ) : !selectedIngredient ? (
-                          <SelectItem value="no-ingredient" disabled>
-                            Primero selecciona un ingrediente
-                          </SelectItem>
-                        ) : filteredUnits.length === 0 ? (
-                          <SelectItem value="no-units" disabled>
-                            {unitSearchTerm.trim() ? 'No se encontraron unidades' : 'No hay unidades compatibles'}
-                          </SelectItem>
-                        ) : (
-                          filteredUnits.map((unit) => (
-                            <SelectItem key={unit.id} value={unit.id}>
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{unit.name}</span>
-                                <span className="text-xs text-muted-foreground">({unit.symbol})</span>
-                              </div>
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  </div>
-
-                {/* Segunda fila: Cantidad y Precio */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="quantity" className="text-sm font-medium">Cantidad *</Label>
-                    <Input
-                      id="quantity"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder={getQuantityPlaceholder()}
-                      className="w-full"
-                      value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="price" className="text-sm font-medium">Precio Total (€) *</Label>
-                    <Input
-                      id="price"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="Precio total por la cantidad"
-                      className="w-full"
-                      value={price}
-                      onChange={(e) => setPrice(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                {/* Botón Agregar */}
-                <div className="flex justify-center pt-4">
-                  <Button 
-                    type="button" 
-                    onClick={addItem} 
-                    disabled={!selectedIngredient || !selectedUnit || !quantity || !price}
-                    className="px-8 py-2"
-                    size="lg"
+          <div className="flex-1 overflow-y-auto">
+            {/* Tags de artículos seleccionados */}
+            {selectedArticles.length > 0 && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                {selectedArticles.map((article) => (
+                  <div
+                    key={article.id}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-sm"
                   >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Agregar Ingrediente
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Items List */}
-            {items.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Artículos de la Compra</CardTitle>
-                  <CardDescription>{items.length} artículo(s) agregado(s)</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Ingrediente</TableHead>
-                          <TableHead>Unidad</TableHead>
-                          <TableHead>Cantidad</TableHead>
-                          <TableHead>Precio Unit.</TableHead>
-                          <TableHead>Total</TableHead>
-                          <TableHead>Acciones</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {items.map((item) => (
-                          <TableRow key={item.id}>
-                            <TableCell className="font-medium">{item.ingredientName}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{item.unitSymbol}</TableCell>
-                            <TableCell>{item.quantity}</TableCell>
-                            <TableCell>€{item.price.toFixed(2)}</TableCell>
-                            <TableCell className="font-bold">€{item.total.toFixed(2)}</TableCell>
-                            <TableCell>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => removeItem(item.id)}
-                                className="text-red-600 hover:text-red-700"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                    <span className="font-medium">{article.name}</span>
+                    <button
+                      onClick={() => removeSelectedArticle(article.id)}
+                      className="hover:bg-blue-200 rounded-full p-0.5 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
-                </CardContent>
-              </Card>
+                ))}
+              </div>
+            )}
+
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Buscar artículo..."
+                value={searchArticle}
+                onChange={(e) => setSearchArticle(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-600"
+              />
+            </div>
+
+            <div className="space-y-2">
+              {filteredArticles.length > 0 ? (
+                filteredArticles.map((article) => {
+                  const isSelected = selectedArticles.some(a => a.id === article.id)
+                  const isInPurchase = items.some(item => item.articleId === article.id)
+                  const isDisabled = isSelected || isInPurchase
+
+                  return (
+                    <div
+                      key={article.id}
+                      onClick={() => !isDisabled && addArticleFromModal(article)}
+                      className={cn(
+                        "p-4 border rounded-lg transition-all",
+                        isDisabled
+                          ? "border-blue-500 bg-blue-50 cursor-not-allowed opacity-60"
+                          : "border-gray-200 hover:bg-blue-50 hover:border-blue-500 cursor-pointer"
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold text-gray-900">{article.name}</p>
+                          <p className="text-sm text-gray-600">
+                            {article.unit} • Costo: €{(article.cost_per_unit || 0).toFixed(2)}
+                          </p>
+                        </div>
+                        {isDisabled ? (
+                          <span className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">
+                            {isInPurchase ? 'En compra ✓' : 'Añadido ✓'}
+                          </span>
+                        ) : (
+                          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                            Añadir
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })
+              ) : (
+                <div className="text-center py-12 text-gray-500">
+                  <p className="text-lg mb-2">No se encontraron artículos</p>
+                  <p className="text-sm">Intenta con otro término de búsqueda</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="border-t pt-4 mt-4">
+            <Button
+              onClick={saveSelectedArticles}
+              disabled={selectedArticles.length === 0}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Guardar ({selectedArticles.length})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de selección de proveedor */}
+      <Dialog open={isSupplierModalOpen} onOpenChange={setIsSupplierModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-xl">Seleccionar Proveedor</DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto">
+            {suppliers.length === 0 ? (
+              <div className="py-12 text-center">
+                <div className="text-4xl mb-4">📦</div>
+                <p className="text-gray-600 mb-2">
+                  Registra tus proveedores para empezar a asociarlos a tus compras
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsSupplierModalOpen(false)
+                    router.push("/suppliers")
+                  }}
+                  className="mt-4"
+                >
+                  Ir a Proveedores
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {suppliers.map((supplier) => (
+                  <div
+                    key={supplier.id}
+                    className={cn(
+                      "p-4 border rounded-lg cursor-pointer transition-all hover:border-blue-500 hover:bg-blue-50",
+                      selectedSupplier?.id === supplier.id ? "border-blue-500 bg-blue-50" : "border-gray-200"
+                    )}
+                    onClick={() => handleSupplierSelect(supplier)}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-900">{supplier.name}</p>
+                        {supplier.category && (
+                          <p className="text-sm text-gray-600 mt-1">{supplier.category}</p>
+                        )}
+                        <div className="flex flex-wrap gap-3 mt-2 text-sm text-gray-500">
+                          {supplier.phone && <span>📞 {supplier.phone}</span>}
+                          {supplier.email && <span>✉️ {supplier.email}</span>}
+                        </div>
+                      </div>
+                      {selectedSupplier?.id === supplier.id && (
+                        <div className="ml-2">
+                          <span className="text-blue-600 text-xl">✓</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 
-          {/* Sidebar */}
-          <div className="space-y-32">
-            {/* Summary */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Resumen de Compra</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total de Artículos:</span>
-                  <span className="font-semibold">{totalItems}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Monto Total:</span>
-                  <span className="text-2xl font-bold text-primary">€{totalAmount.toFixed(2)}</span>
-                </div>
-              </CardContent>
-            </Card>
+          <DialogFooter className="border-t pt-4 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setIsSupplierModalOpen(false)}
+            >
+              Cancelar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-            {/* Integration Info */}
-            <Card className="border-blue-200 bg-blue-50">
-              <CardContent className="pt-6">
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-blue-600 mt-0.5" />
+      {/* Fixed overlay full-screen */}
+      <div className="fixed inset-0 bg-white z-40 overflow-y-auto">
+        {/* Header sticky */}
+        <div className="sticky top-0 bg-white border-b border-gray-200 z-[9999] transition-all">
+          <div className="max-w-4xl mx-auto px-6 py-5 flex justify-between items-center">
+            <div className="flex-1">
+              <Link href="/purchases">
+                <button
+                  className="w-10 h-10 bg-gray-200 hover:bg-gray-300 rounded-lg flex items-center justify-center transition-colors text-xl cursor-pointer"
+                >
+                  ✕
+                </button>
+              </Link>
+            </div>
+            <div className="flex-1 text-center">
+              <h2 className={`text-lg font-semibold transition-opacity duration-300 ${scrolled ? 'opacity-100' : 'opacity-0'}`}>
+                {formData.name || 'Crea una compra'}
+              </h2>
+            </div>
+            <div className="flex-1 flex justify-end">
+              <button
+                onClick={handleSubmit}
+                disabled={loading || !canSave}
+                className={cn(
+                  "px-6 py-3 rounded-lg font-semibold transition-colors",
+                  canSave && !loading
+                    ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                )}
+              >
+                {loading ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="max-w-4xl mx-auto bg-white">
+          <div className="p-6">
+            <h1 ref={titleRef} className="text-3xl font-semibold mb-6">
+              Crea una compra
+            </h1>
+
+            {/* Banner informativo */}
+            <div className="bg-blue-50 p-4 rounded-lg flex items-center justify-between mb-8">
+              <div className="flex items-center gap-3">
+                <span className="text-xl">📢</span>
+                <span className="text-sm">Crea compras detalladas que actualizarán automáticamente el inventario de productos</span>
+              </div>
+              <a href="#" className="text-blue-600 font-semibold text-sm hover:underline">Más información</a>
+            </div>
+
+            {/* Sección Información */}
+            <div className="mb-10">
+              <h2 className="text-xl font-semibold mb-4">Información</h2>
+
+              <div className="space-y-4">
+                <Input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => handleInputChange("name", e.target.value)}
+                  className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-600 text-base"
+                  placeholder="Nombre de la compra"
+                />
+
+                <Textarea
+                  value={formData.description}
+                  onChange={(e) => handleInputChange("description", e.target.value)}
+                  className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-600 text-base resize-none"
+                  placeholder="Descripción (opcional)"
+                  rows={4}
+                />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-2 uppercase">Fecha</label>
+                    <Input
+                      type="date"
+                      value={formData.purchaseDate}
+                      onChange={(e) => handleInputChange("purchaseDate", e.target.value)}
+                      className="w-full h-10 px-4 border border-gray-300 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-2 uppercase">Estado</label>
+                    <select
+                      value={formData.status}
+                      onChange={(e) => handleInputChange("status", e.target.value)}
+                      className="w-full h-10 px-4 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="completed">Completada</option>
+                      <option value="pending">Pendiente</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <hr className="border-gray-200 mb-10" />
+
+            {/* Sección Proveedores */}
+            <section className="mb-10">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-xl font-semibold">Proveedores</h2>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="bg-gray-100 hover:bg-gray-200 border border-gray-300"
+                  onClick={() => setIsSupplierModalOpen(true)}
+                >
+                  Añadir
+                </Button>
+              </div>
+
+              <p className="text-sm text-gray-600 mb-4">
+                Añade el proveedor de esta compra
+              </p>
+
+              {/* Proveedor seleccionado */}
+              {selectedSupplier && (
+                <div className="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                  <div className="flex items-start justify-between">
                     <div>
-                      <h3 className="font-semibold text-blue-900">Actualización Automática</h3>
-                      <p className="text-sm text-blue-800 mt-1">
-                        Al registrar esta compra se actualizará automáticamente:
+                      <p className="font-semibold text-gray-900">{selectedSupplier.name}</p>
+                      {selectedSupplier.category && (
+                        <p className="text-sm text-gray-600 mt-1">{selectedSupplier.category}</p>
+                      )}
+                      <div className="flex flex-col gap-1 mt-2 text-sm text-gray-500">
+                        {selectedSupplier.phone && <span>📞 {selectedSupplier.phone}</span>}
+                        {selectedSupplier.email && <span>✉️ {selectedSupplier.email}</span>}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelectedSupplier(null)}
+                      className="text-gray-600 hover:text-gray-800"
+                    >
+                      Quitar
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {!selectedSupplier && (
+                <div className="p-4 border border-dashed border-gray-300 rounded-lg text-center text-sm text-gray-500">
+                  No hay proveedor seleccionado
+                </div>
+              )}
+            </section>
+
+            <hr className="border-gray-200 mb-10" />
+
+            {/* Sección Artículos */}
+            <div className="mb-10">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h2 className="text-xl font-semibold">Artículos</h2>
+                  <p className="text-sm text-gray-600 mt-1">Añade los artículos de la compra con sus cantidades y costos</p>
+                </div>
+                <button
+                  onClick={() => setIsArticleModalOpen(true)}
+                  className="px-5 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-semibold transition-colors cursor-pointer"
+                >
+                  Añadir artículos
+                </button>
+              </div>
+
+              {/* Banner informativo cuando está vacío */}
+              {items.length === 0 && (
+                <div className="bg-gradient-to-r from-slate-50 to-blue-50 p-4 rounded-lg border border-slate-200 mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-shrink-0 w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm text-slate-700 leading-relaxed">
+                        Agrega los artículos de tu compra, se calcularán automáticamente los totales y se actualizará el inventario
                       </p>
                     </div>
                   </div>
-                  <ul className="text-sm text-blue-800 space-y-1 ml-8">
-                    <li>• Stock de ingredientes</li>
-                    <li>• Registro de gastos</li>
-                    <li>• Capital de la empresa</li>
-                  </ul>
                 </div>
-              </CardContent>
-            </Card>
+              )}
 
-            {/* Submit Button */}
-            <Button type="submit" className="w-full" disabled={isSubmitting || items.length === 0 || !selectedSupplier}>
-              {isSubmitting ? "Registrando..." : "Registrar Compra"}
-            </Button>
+              {/* Estadísticas de artículos */}
+              {items.length > 0 && (
+                <div className="mb-4 grid grid-cols-2 gap-3">
+                  <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 text-center">
+                    <p className="text-xs text-blue-600 font-semibold mb-1">Artículos</p>
+                    <p className="text-2xl font-bold text-blue-900">{items.length}</p>
+                  </div>
+                  <div className="p-3 bg-green-50 rounded-lg border border-green-200 text-center">
+                    <p className="text-xs text-green-600 font-semibold mb-1">Total</p>
+                    <p className="text-2xl font-bold text-green-900">€{totalAmount.toFixed(2)}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Lista de artículos */}
+              {items.length > 0 && (
+                <div className="space-y-3">
+                  {items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-4 border border-gray-200 rounded-lg bg-white hover:border-gray-300 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="flex-1">
+                          <span className="font-semibold text-gray-900 block">{item.articleName}</span>
+                          <span className="text-xs text-gray-500">Unidad: {item.unitSymbol}</span>
+                        </div>
+                        <button
+                          onClick={() => removeItem(item.id)}
+                          className="text-red-600 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-12 gap-3 items-end">
+                        {/* Cantidad */}
+                        <div className="col-span-4">
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">Cantidad</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={item.quantity || ''}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.]/g, '')
+                              const parts = value.split('.')
+                              const sanitized = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : value
+                              updateItemQuantity(item.id, sanitized ? Number(sanitized) : 0)
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-600 text-sm"
+                            placeholder="0"
+                          />
+                        </div>
+
+                        {/* Precio unitario */}
+                        <div className="col-span-4">
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">Precio (€/{item.unitSymbol})</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={item.price || ''}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/[^0-9.]/g, '')
+                              const parts = value.split('.')
+                              const sanitized = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : value
+                              updateItemPrice(item.id, sanitized ? Number(sanitized) : 0)
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-600 text-sm"
+                            placeholder="0.00"
+                          />
+                        </div>
+
+                        {/* Total */}
+                        <div className="col-span-4">
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">Total (€)</label>
+                          <div className="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-lg text-sm font-semibold text-gray-900">
+                            €{item.total.toFixed(2)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </form>
-
-      {/* Success Modal */}
-      {successData && (
-        <SuccessModal
-          isOpen={showSuccessModal}
-          onClose={() => setShowSuccessModal(false)}
-          title="¡Compra Registrada!"
-          operation="Compra"
-          details={successData}
-          onViewDetails={() => {
-            setShowSuccessModal(false)
-            router.push(`/purchases/${successData.purchase.id}`)
-          }}
-          onContinue={() => {
-            setShowSuccessModal(false)
-            router.push('/purchases')
-          }}
-        />
-      )}
-
-    </div>
+      </div>
+    </>
   )
 }
