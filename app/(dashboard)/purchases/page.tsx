@@ -12,6 +12,8 @@ import { useDeleteModal } from "@/hooks/use-delete-modal"
 
 interface Purchase {
   id: string
+  name: string
+  description?: string | null
   purchase_date: string
   total_amount: number
   status: string
@@ -93,12 +95,12 @@ export default function PurchasesPage() {
   }
 
   const handleView = (purchase: Purchase) => {
-    router.push(`/purchases/${purchase.id}`)
+    router.push(`/purchases/edit/${purchase.id}`)
     setOpenMenuId(null)
   }
 
   const handleEdit = (purchase: Purchase) => {
-    router.push(`/purchases/${purchase.id}/edit`)
+    router.push(`/purchases/edit/${purchase.id}`)
     setOpenMenuId(null)
   }
 
@@ -127,8 +129,9 @@ export default function PurchasesPage() {
 
   const filteredPurchases = purchases.filter((purchase) => {
     const matchesSearch =
+      (purchase.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (purchase.suppliers?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (purchase.notes || '').toLowerCase().includes(searchTerm.toLowerCase())
+      (purchase.description || '').toLowerCase().includes(searchTerm.toLowerCase())
     const matchesStatus = statusFilter === "all" || purchase.status === statusFilter
     return matchesSearch && matchesStatus
   })
@@ -288,11 +291,11 @@ export default function PurchasesPage() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200">
           {/* Encabezados de tabla */}
           <div className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 bg-gray-50 font-medium text-sm text-gray-700">
+            <div className="col-span-3">Nombre</div>
             <div className="col-span-2">Fecha</div>
-            <div className="col-span-3">Proveedor</div>
+            <div className="col-span-2">Proveedor</div>
             <div className="col-span-2">Total</div>
             <div className="col-span-2">Estado</div>
-            <div className="col-span-2">Notas</div>
             <div className="col-span-1"></div>
           </div>
 
@@ -319,12 +322,21 @@ export default function PurchasesPage() {
                 key={purchase.id}
                 className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 hover:bg-gray-50 items-center transition-colors"
               >
+                <div className="col-span-3">
+                  <button
+                    onClick={() => router.push(`/purchases/edit/${purchase.id}`)}
+                    className="text-left font-semibold text-blue-600 hover:text-blue-800 hover:underline transition-colors cursor-pointer"
+                  >
+                    {purchase.name}
+                  </button>
+                </div>
+
                 <div className="col-span-2 flex items-center gap-2 text-gray-700">
                   <Calendar size={16} className="text-gray-400" />
                   {new Date(purchase.purchase_date).toLocaleDateString('es-ES')}
                 </div>
 
-                <div className="col-span-3 flex items-center gap-2 text-gray-700">
+                <div className="col-span-2 flex items-center gap-2 text-gray-700">
                   <Building size={16} className="text-gray-400" />
                   {purchase.suppliers?.name || 'Sin proveedor'}
                 </div>
@@ -335,10 +347,6 @@ export default function PurchasesPage() {
 
                 <div className="col-span-2">
                   {getStatusBadge(purchase.status)}
-                </div>
-
-                <div className="col-span-2 text-gray-700 text-sm truncate">
-                  {purchase.notes || 'Sin notas'}
                 </div>
 
                 <div className="col-span-1 flex items-center justify-end">
@@ -401,8 +409,8 @@ export default function PurchasesPage() {
         onClose={closeDeleteModal}
         onConfirm={handleDelete}
         title="Eliminar Compra"
-        description="¿Estás seguro de que deseas eliminar la compra del"
-        itemName={`${new Date(deleteModal.item?.purchase_date || '').toLocaleDateString('es-ES')} - ${deleteModal.item?.suppliers?.name || 'Sin proveedor'}`}
+        description="¿Estás seguro de que deseas eliminar la compra"
+        itemName={deleteModal.item?.name || 'Sin nombre'}
         isLoading={deleteModal.isLoading}
       />
     </div>
