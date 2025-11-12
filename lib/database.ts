@@ -988,11 +988,13 @@ export class DatabaseService {
   }
 
   static async createPurchase(purchaseData: {
+    name: string
+    description?: string
     supplier_id?: string
     purchase_date: string
     total_amount: number
     status?: string
-    notes?: string
+    notes?: string // Legacy field for backwards compatibility
     items: Array<{
       article_id?: string
       ingredient_id?: string // Legacy field for backwards compatibility
@@ -1004,16 +1006,20 @@ export class DatabaseService {
   }) {
     try {
       console.log('Creating purchase with data:', purchaseData)
-      
+
       // Validate required data
+      if (!purchaseData.name || !purchaseData.name.trim()) {
+        throw new Error('El nombre de la compra es requerido')
+      }
+
       if (!purchaseData.purchase_date) {
         throw new Error('Fecha de compra es requerida')
       }
-      
+
       if (!purchaseData.items || purchaseData.items.length === 0) {
         throw new Error('Debe incluir al menos un artículo en la compra')
       }
-      
+
       if (!purchaseData.total_amount || purchaseData.total_amount <= 0) {
         throw new Error('El monto total debe ser mayor a 0')
       }
@@ -1034,15 +1040,22 @@ export class DatabaseService {
 
       // Create the purchase
       const purchaseToInsert: any = {
+        name: purchaseData.name.trim(),
         purchase_date: purchaseData.purchase_date,
         total_amount: purchaseData.total_amount,
         status: purchaseData.status || 'completed'
       }
-      
-      if (purchaseData.notes) {
-        purchaseToInsert.notes = purchaseData.notes
+
+      // Add optional description
+      if (purchaseData.description && purchaseData.description.trim()) {
+        purchaseToInsert.description = purchaseData.description.trim()
       }
-      
+
+      // Legacy support for notes field
+      if (purchaseData.notes && !purchaseData.description) {
+        purchaseToInsert.description = purchaseData.notes
+      }
+
       // Only add supplier_id if it's a valid UUID
       if (purchaseData.supplier_id && purchaseData.supplier_id.length > 10) {
         purchaseToInsert.supplier_id = purchaseData.supplier_id
