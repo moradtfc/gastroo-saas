@@ -32,6 +32,8 @@ export default function SuppliersPage() {
   const [supplierGroupsMap, setSupplierGroupsMap] = useState<Record<string, Group[]>>({})
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [isGroupFilterModalOpen, setIsGroupFilterModalOpen] = useState(false)
+  const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null)
+  const [isDeleteMultipleModalOpen, setIsDeleteMultipleModalOpen] = useState(false)
   const suppliersPerPage = 12
   const menuRef = useRef<HTMLDivElement>(null)
   const sortMenuRef = useRef<HTMLDivElement>(null)
@@ -119,12 +121,14 @@ export default function SuppliersPage() {
   }
 
   const handleView = (supplier: any) => {
-    window.location.href = `/suppliers/${supplier.id}`
+    setEditingSupplierId(supplier.id)
+    setIsCreateModalOpen(true)
     setOpenMenuId(null)
   }
 
   const handleEdit = (supplier: any) => {
-    window.location.href = `/suppliers/${supplier.id}/edit`
+    setEditingSupplierId(supplier.id)
+    setIsCreateModalOpen(true)
     setOpenMenuId(null)
   }
 
@@ -153,12 +157,10 @@ export default function SuppliersPage() {
 
   const handleDeleteMultiple = async () => {
     if (selectedItems.length === 0) return
-    
-    if (!confirm(`¿Estás seguro de que deseas eliminar ${selectedItems.length} proveedor(es)?`)) {
-      return
-    }
 
     try {
+      setDeleteLoading(true)
+
       for (const supplierId of selectedItems) {
         await DatabaseService.supabase
           .from('suppliers')
@@ -168,11 +170,26 @@ export default function SuppliersPage() {
 
       toast.success(`${selectedItems.length} proveedor(es) eliminado(s) correctamente`)
       setSelectedItems([])
+      setIsDeleteMultipleModalOpen(false)
       loadSuppliers()
     } catch (error) {
       console.error("Error eliminando proveedores:", error)
       toast.error("Error al eliminar proveedores")
+    } finally {
+      setDeleteLoading(false)
     }
+  }
+
+  const getSupplierName = (supplier: any) => {
+    // Si existe el campo name y no está vacío, usarlo
+    if (supplier.name && supplier.name.trim()) {
+      return supplier.name
+    }
+    // Si no, construir el nombre desde first_name y last_name
+    const firstName = supplier.first_name || ""
+    const lastName = supplier.last_name || ""
+    const fullName = `${firstName} ${lastName}`.trim()
+    return fullName || "Sin nombre"
   }
 
   const buildWhatsappNumber = (supplier: any) => {
@@ -283,7 +300,7 @@ export default function SuppliersPage() {
 
   const filteredSuppliers = suppliers
     .filter((supplier) => {
-      const supplierName = (supplier.name || "").toLowerCase()
+      const supplierName = getSupplierName(supplier).toLowerCase()
       const matchesSearch = supplierName.includes(searchTerm.toLowerCase())
       const supplierGroupIds = (supplierGroupsMap[supplier.id] || []).map((group) => group.id)
       const matchesGroup =
@@ -294,21 +311,21 @@ export default function SuppliersPage() {
     })
     .sort((a, b) => {
       if (sortOrder === null || sortBy === null) return 0
-      
+
       if (sortBy === "name") {
-        const nameA = a.name.toLowerCase()
-        const nameB = b.name.toLowerCase()
-        return sortOrder === "asc" 
+        const nameA = getSupplierName(a).toLowerCase()
+        const nameB = getSupplierName(b).toLowerCase()
+        return sortOrder === "asc"
           ? nameA.localeCompare(nameB)
           : nameB.localeCompare(nameA)
       } else if (sortBy === "email") {
         const emailA = (a.email || "").toLowerCase()
         const emailB = (b.email || "").toLowerCase()
-        return sortOrder === "asc" 
+        return sortOrder === "asc"
           ? emailA.localeCompare(emailB)
           : emailB.localeCompare(emailA)
       }
-      
+
       return 0
     })
 
@@ -458,8 +475,14 @@ export default function SuppliersPage() {
               )}
             </div>
 
-            <button 
-              onClick={() => setIsGroupsModalOpen(true)}
+            <button
+              onClick={() => {
+                if (selectedItems.length === 0) {
+                  toast.error('Por favor selecciona al menos un proveedor')
+                  return
+                }
+                setIsGroupsModalOpen(true)
+              }}
               className="px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer"
             >
               Agrupar
@@ -553,14 +576,14 @@ export default function SuppliersPage() {
                         </div>
 
                   <div className="col-span-4 flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded flex items-center justify-center text-white text-sm font-semibold ${getColorFromName(supplier.name)}`}>
-                      {getInitials(supplier.name)}
+                    <div className={`w-10 h-10 rounded flex items-center justify-center text-white text-sm font-semibold ${getColorFromName(getSupplierName(supplier))}`}>
+                      {getInitials(getSupplierName(supplier))}
                             </div>
-                    <span 
+                    <span
                       onClick={() => handleView(supplier)}
                       className="text-blue-600 font-medium hover:underline cursor-pointer"
                     >
-                      {supplier.name}
+                      {getSupplierName(supplier)}
                     </span>
                             </div>
 
@@ -721,7 +744,7 @@ export default function SuppliersPage() {
                     Agrupar
                   </button>
                   <button
-                    onClick={handleDeleteMultiple}
+                    onClick={() => setIsDeleteMultipleModalOpen(true)}
                     className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors shadow-sm cursor-pointer"
                   >
                     Eliminar proveedores
@@ -739,16 +762,32 @@ export default function SuppliersPage() {
         onConfirm={handleDelete}
         title="Eliminar Proveedor"
         description="¿Estás seguro de que deseas eliminar el proveedor"
-        itemName={deleteModal.item?.name || ''}
+        itemName={deleteModal.item ? getSupplierName(deleteModal.item) : ''}
         isLoading={deleteModal.isLoading}
+      />
+
+      <DeleteConfirmationModal
+        isOpen={isDeleteMultipleModalOpen}
+        onClose={() => setIsDeleteMultipleModalOpen(false)}
+        onConfirm={handleDeleteMultiple}
+        title="Eliminar Proveedores"
+        description={`¿Estás seguro de que deseas eliminar ${selectedItems.length} proveedor(es)?`}
+        itemName=""
+        isLoading={deleteModal.isLoading}
+        additionalInfo="Esta acción no se puede deshacer."
       />
 
       <CreateSupplierModal
         isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        supplierId={editingSupplierId}
+        onClose={() => {
+          setIsCreateModalOpen(false)
+          setEditingSupplierId(null)
+        }}
         onSuccess={() => {
           loadSuppliers()
           setIsCreateModalOpen(false)
+          setEditingSupplierId(null)
         }}
       />
 

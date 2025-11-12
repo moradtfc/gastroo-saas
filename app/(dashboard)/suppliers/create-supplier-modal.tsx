@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { CheckedState } from "@radix-ui/react-checkbox"
 import { CalendarIcon } from "lucide-react"
-import { format } from "date-fns"
+import { format, parse } from "date-fns"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,7 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
-import { DatabaseService, Country, Group, FoodCategory } from "@/lib/database"
+import { DatabaseService, Country, Group, FoodCategory, Supplier } from "@/lib/database"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -22,9 +22,10 @@ interface CreateSupplierModalProps {
   isOpen: boolean
   onClose: () => void
   onSuccess: () => void
+  supplierId?: string | null
 }
 
-export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSupplierModalProps) {
+export function CreateSupplierModal({ isOpen, onClose, onSuccess, supplierId }: CreateSupplierModalProps) {
   const [countries, setCountries] = useState<Country[]>([])
   const [groups, setGroups] = useState<Group[]>([])
   const [foodCategories, setFoodCategories] = useState<FoodCategory[]>([])
@@ -34,6 +35,8 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const [selectedFoodCategoryId, setSelectedFoodCategoryId] = useState("")
   const [birthDate, setBirthDate] = useState<Date | undefined>(undefined)
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false)
+  const [initialData, setInitialData] = useState<any>(null)
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -58,8 +61,11 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
       loadCountries()
       loadGroups()
       loadFoodCategories()
+      if (supplierId) {
+        loadSupplierData(supplierId)
+      }
     }
-  }, [isOpen])
+  }, [isOpen, supplierId])
 
   const loadCountries = async () => {
     try {
@@ -91,6 +97,110 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
     }
   }
 
+  const loadSupplierData = async (id: string) => {
+    try {
+      const { data, error } = await DatabaseService.supabase
+        .from('suppliers')
+        .select('*')
+        .eq('id', id)
+        .single()
+
+      if (error) throw error
+      if (!data) return
+
+      // Cargar grupos del proveedor
+      const { data: supplierGroups } = await DatabaseService.supabase
+        .from('supplier_groups')
+        .select('group_id')
+        .eq('supplier_id', id)
+
+      const groupIds = supplierGroups?.map(sg => sg.group_id) || []
+      setSelectedGroupIds(groupIds)
+
+      // Parsear nombre completo
+      const firstName = data.first_name || ""
+      const lastName = data.last_name || ""
+
+      // Parsear teléfono
+      const phonePrefix = data.phone_country_code || ""
+      const phoneNumber = data.phone_number || ""
+
+      setFormData({
+        firstName,
+        lastName,
+        email: data.email || "",
+        phonePrefix,
+        phoneNumber,
+        hasWhatsApp: data.has_whatsapp || false,
+        address: data.address || "",
+        addressLine2: data.address_line2 || "",
+        city: data.city || "",
+        province: data.province || "",
+        postalCode: data.postal_code || "",
+        category: data.category || "",
+        company: data.company || "",
+        identifier: data.notes || "",
+        taxId: data.tax_id || "",
+      })
+
+      // Configurar países
+      if (data.phone_country_code) {
+        const country = countries.find(c => c.phone_prefix === data.phone_country_code)
+        if (country) {
+          setSelectedPhoneCountry(country.iso_code)
+        }
+      }
+
+      if (data.country) {
+        setSelectedAddressCountry(data.country)
+      }
+
+      // Configurar categoría de alimento
+      if (data.food_category_id) {
+        setSelectedFoodCategoryId(data.food_category_id)
+      }
+
+      // Configurar fecha
+      if (data.birth_date) {
+        try {
+          const parsedDate = parse(data.birth_date, "yyyy-MM-dd", new Date())
+          setBirthDate(parsedDate)
+        } catch (e) {
+          console.error('Error parsing date:', e)
+        }
+      }
+
+      // Guardar datos iniciales para detectar cambios
+      setInitialData({
+        formData: {
+          firstName,
+          lastName,
+          email: data.email || "",
+          phonePrefix,
+          phoneNumber,
+          hasWhatsApp: data.has_whatsapp || false,
+          address: data.address || "",
+          addressLine2: data.address_line2 || "",
+          city: data.city || "",
+          province: data.province || "",
+          postalCode: data.postal_code || "",
+          category: data.category || "",
+          company: data.company || "",
+          identifier: data.notes || "",
+          taxId: data.tax_id || "",
+        },
+        birthDate: data.birth_date,
+        selectedGroupIds: groupIds,
+        selectedFoodCategoryId: data.food_category_id || "",
+        selectedPhoneCountry: data.phone_country_code ? countries.find(c => c.phone_prefix === data.phone_country_code)?.iso_code || "" : "",
+        selectedAddressCountry: data.country || "",
+      })
+    } catch (error) {
+      console.error('Error loading supplier:', error)
+      toast.error('Error al cargar datos del proveedor')
+    }
+  }
+
   const handleCountryChange = (countryCode: string, type: 'phone' | 'address') => {
     const country = countries.find(c => c.iso_code === countryCode)
     if (country) {
@@ -114,6 +224,22 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
       return prev.filter((id) => id !== groupId)
     })
   }
+
+  // Detectar si hay cambios para habilitar/deshabilitar el botón guardar
+  const hasChanges = useMemo(() => {
+    if (!supplierId || !initialData) return true // Si es creación, siempre habilitado
+
+    const currentBirthDate = birthDate ? format(birthDate, "yyyy-MM-dd") : null
+
+    return (
+      JSON.stringify(formData) !== JSON.stringify(initialData.formData) ||
+      currentBirthDate !== initialData.birthDate ||
+      JSON.stringify(selectedGroupIds.sort()) !== JSON.stringify((initialData.selectedGroupIds || []).sort()) ||
+      selectedFoodCategoryId !== initialData.selectedFoodCategoryId ||
+      selectedPhoneCountry !== initialData.selectedPhoneCountry ||
+      selectedAddressCountry !== initialData.selectedAddressCountry
+    )
+  }, [formData, birthDate, selectedGroupIds, selectedFoodCategoryId, selectedPhoneCountry, selectedAddressCountry, initialData, supplierId])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -168,17 +294,41 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
         food_category_id: selectedFoodCategoryId || null,
       }
 
-      const newSupplier = await DatabaseService.createSupplier(supplierData)
+      let savedSupplier
+      if (supplierId) {
+        // Actualizar proveedor existente
+        savedSupplier = await DatabaseService.updateSupplier(supplierId, supplierData)
 
-      if (selectedGroupIds.length > 0) {
-        await Promise.all(
-          selectedGroupIds.map((groupId) =>
-            DatabaseService.addSuppliersToGroup(groupId, [newSupplier.id])
+        // Actualizar grupos: eliminar los antiguos y agregar los nuevos
+        await DatabaseService.supabase
+          .from('supplier_groups')
+          .delete()
+          .eq('supplier_id', supplierId)
+
+        if (selectedGroupIds.length > 0) {
+          await Promise.all(
+            selectedGroupIds.map((groupId) =>
+              DatabaseService.addSuppliersToGroup(groupId, [supplierId])
+            )
           )
-        )
+        }
+
+        toast.success('Proveedor actualizado exitosamente')
+      } else {
+        // Crear nuevo proveedor
+        savedSupplier = await DatabaseService.createSupplier(supplierData)
+
+        if (selectedGroupIds.length > 0) {
+          await Promise.all(
+            selectedGroupIds.map((groupId) =>
+              DatabaseService.addSuppliersToGroup(groupId, [savedSupplier.id])
+            )
+          )
+        }
+
+        toast.success('Proveedor creado exitosamente')
       }
 
-      toast.success('Proveedor creado exitosamente')
       onSuccess()
       handleClose()
     } catch (error: any) {
@@ -212,17 +362,21 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
     setSelectedGroupIds([])
     setSelectedFoodCategoryId("")
     setBirthDate(undefined)
+    setIsCalendarOpen(false)
+    setInitialData(null)
     onClose()
   }
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-[500px] max-h-[90vh] overflow-y-auto p-0">
-        <DialogHeader className="px-6 py-5 border-b border-gray-200">
-          <DialogTitle className="text-lg font-semibold text-gray-900">Crear proveedor</DialogTitle>
+      <DialogContent className="max-w-[500px] max-h-[90vh] p-0 flex flex-col">
+        <DialogHeader className="px-6 py-5 border-b border-gray-200 flex-shrink-0">
+          <DialogTitle className="text-lg font-semibold text-gray-900">
+            {supplierId ? 'Editar proveedor' : 'Crear proveedor'}
+          </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="px-6 py-6 space-y-5">
+        <form onSubmit={handleSubmit} className="px-6 py-6 space-y-5 overflow-y-auto flex-1">
           {/* Nombre y Apellidos */}
           <div className="space-y-2">
             <label htmlFor="firstName" className="block text-sm font-medium text-gray-900">
@@ -481,16 +635,17 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
             />
           </div>
 
-          {/* Fecha de Nacimiento */}
+          {/* Proveedor desde */}
           <div className="space-y-2">
             <label className="block text-sm font-medium text-gray-900">
-              Fecha de nacimiento
+              Proveedor desde
             </label>
-            <Popover modal={true}>
+            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen} modal={true}>
               <PopoverTrigger asChild>
                 <Button
                   type="button"
                   variant="outline"
+                  onClick={() => setIsCalendarOpen(true)}
                   className={cn(
                     "w-full justify-start text-left font-normal px-3 py-2 text-sm border border-gray-300 rounded focus:border-blue-600 focus:ring-0",
                     !birthDate && "text-gray-500"
@@ -500,14 +655,18 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
                   {birthDate ? format(birthDate, "dd/MM/yyyy") : "Seleccionar fecha"}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
+              <PopoverContent className="w-auto p-0 z-[9999]" align="start" sideOffset={8}>
                 <Calendar
                   mode="single"
                   selected={birthDate}
-                  onSelect={setBirthDate}
-                  captionLayout="dropdown-buttons"
-                  fromYear={1900}
-                  toYear={new Date().getFullYear()}
+                  onSelect={(date) => {
+                    setBirthDate(date)
+                    setIsCalendarOpen(false)
+                  }}
+                  captionLayout="dropdown"
+                  fromDate={new Date(1900, 0, 1)}
+                  toDate={new Date()}
+                  defaultMonth={birthDate || new Date(2000, 0, 1)}
                   initialFocus
                 />
               </PopoverContent>
@@ -529,20 +688,20 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess }: CreateSuppli
           </div>
         </form>
 
-        <DialogFooter className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-          <Button 
-            type="button" 
-            variant="ghost" 
+        <DialogFooter className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
+          <Button
+            type="button"
+            variant="ghost"
             onClick={handleClose}
             className="px-5 py-2.5 text-sm font-semibold text-blue-600 hover:bg-gray-100 rounded"
           >
             Cancelar
           </Button>
-          <Button 
-            type="submit" 
-            disabled={loading}
+          <Button
+            type="submit"
+            disabled={loading || !hasChanges}
             onClick={handleSubmit}
-            className="px-6 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded"
+            className="px-6 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? "Guardando..." : "Guardar"}
           </Button>
