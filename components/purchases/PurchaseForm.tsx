@@ -78,6 +78,19 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
   const titleRef = useRef<HTMLHeadingElement>(null)
 
   useEffect(() => {
+    // Reset state when purchaseId changes
+    if (isEditMode) {
+      setInitialLoading(true)
+      setItems([])
+      setSelectedSupplier(null)
+      setFormData({
+        name: "",
+        description: "",
+        purchaseDate: new Date().toISOString().split("T")[0],
+        status: "paid"
+      })
+    }
+
     loadData()
 
     const handleScroll = () => {
@@ -89,7 +102,8 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
 
     window.addEventListener("scroll", handleScroll)
     return () => window.removeEventListener("scroll", handleScroll)
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [purchaseId])
 
   const loadData = async () => {
     try {
