@@ -663,9 +663,10 @@ export function CreateSupplierModal({ isOpen, onClose, onSuccess, supplierId }: 
                     setBirthDate(date)
                     setIsCalendarOpen(false)
                   }}
-                  captionLayout="dropdown-buttons"
-                  fromYear={1900}
-                  toYear={new Date().getFullYear()}
+                  captionLayout="dropdown"
+                  fromDate={new Date(1900, 0, 1)}
+                  toDate={new Date()}
+                  defaultMonth={birthDate || new Date(2000, 0, 1)}
                   initialFocus
                 />
               </PopoverContent>
