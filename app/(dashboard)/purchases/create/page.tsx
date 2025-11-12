@@ -579,12 +579,12 @@ export default function CreatePurchasePage() {
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-2 uppercase">Fecha</label>
                     <div className="relative">
-                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none z-10" />
                       <Input
                         type="date"
                         value={formData.purchaseDate}
                         onChange={(e) => handleInputChange("purchaseDate", e.target.value)}
-                        className="w-full h-10 pl-10 pr-4 border border-gray-300 rounded-lg bg-white"
+                        className="w-full h-10 pl-10 pr-4 border border-gray-300 rounded-lg bg-white [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:left-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                       />
                     </div>
                   </div>
