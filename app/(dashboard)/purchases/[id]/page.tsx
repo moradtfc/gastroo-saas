@@ -1,5 +1,5 @@
-import CreatePurchasePage from "../create/page"
+import PurchaseForm from "@/components/purchases/PurchaseForm"
 
 export default function EditPurchasePage({ params }: { params: { id: string } }) {
-  return <CreatePurchasePage purchaseId={params.id} />
+  return <PurchaseForm purchaseId={params.id} />
 }
