@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect, useRef } from "react"
-import { Search, Filter, ChevronDown, Plus, MoreVertical, Calendar, Building, Package, Eye, Edit, Trash2 } from "lucide-react"
+import { Search, Filter, ChevronDown, Plus, MoreVertical, Calendar, Building, Package, Eye, Edit, Trash2, Upload, ChevronLeft, ChevronRight, X } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { DatabaseService } from "@/lib/database"
@@ -9,6 +9,8 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { DeleteConfirmationModal } from "@/components/ui/delete-confirmation-modal"
 import { useDeleteModal } from "@/hooks/use-delete-modal"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 
 interface Purchase {
   id: string
@@ -23,6 +25,9 @@ interface Purchase {
   } | null
 }
 
+type SortField = 'date' | 'amount' | null
+type SortOrder = 'asc' | 'desc'
+
 export default function PurchasesPage() {
   const router = useRouter()
   const [purchases, setPurchases] = useState<Purchase[]>([])
@@ -31,10 +36,18 @@ export default function PurchasesPage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [showBanner, setShowBanner] = useState(true)
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
-  const [openStatusMenu, setOpenStatusMenu] = useState(false)
+  const [openFilterMenu, setOpenFilterMenu] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [sortField, setSortField] = useState<SortField>(null)
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
+
   const { deleteModal, openDeleteModal, closeDeleteModal, setLoading: setDeleteLoading } = useDeleteModal()
   const menuRef = useRef<HTMLDivElement>(null)
-  const statusMenuRef = useRef<HTMLDivElement>(null)
+  const filterMenuRef = useRef<HTMLDivElement>(null)
+
+  const itemsPerPage = 12
 
   useEffect(() => {
     loadPurchases()
@@ -45,8 +58,8 @@ export default function PurchasesPage() {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setOpenMenuId(null)
       }
-      if (statusMenuRef.current && !statusMenuRef.current.contains(event.target as Node)) {
-        setOpenStatusMenu(false)
+      if (filterMenuRef.current && !filterMenuRef.current.contains(event.target as Node)) {
+        setOpenFilterMenu(false)
       }
     }
 
@@ -119,22 +132,84 @@ export default function PurchasesPage() {
     }
   }
 
-  const getStatusLabel = () => {
-    if (statusFilter === "all") return "Todos los estados"
-    if (statusFilter === "paid" || statusFilter === "completed") return "Pagadas"
-    if (statusFilter === "unpaid" || statusFilter === "pending") return "Por Pagar"
-    if (statusFilter === "cancelled") return "Canceladas"
-    return "Todos los estados"
+  const applyFilters = () => {
+    let filtered = [...purchases]
+
+    // Filtro de búsqueda
+    if (searchTerm) {
+      filtered = filtered.filter((purchase) =>
+        (purchase.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (purchase.suppliers?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (purchase.description || '').toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    }
+
+    // Filtro de estado
+    if (statusFilter !== "all") {
+      filtered = filtered.filter((purchase) => {
+        if (statusFilter === "paid") {
+          return purchase.status === "paid" || purchase.status === "completed"
+        }
+        if (statusFilter === "unpaid") {
+          return purchase.status === "unpaid" || purchase.status === "pending"
+        }
+        return purchase.status === statusFilter
+      })
+    }
+
+    // Filtro de rango de fechas
+    if (dateFrom) {
+      filtered = filtered.filter((purchase) =>
+        new Date(purchase.purchase_date) >= new Date(dateFrom)
+      )
+    }
+    if (dateTo) {
+      filtered = filtered.filter((purchase) =>
+        new Date(purchase.purchase_date) <= new Date(dateTo)
+      )
+    }
+
+    // Ordenamiento
+    if (sortField === 'date') {
+      filtered.sort((a, b) => {
+        const dateA = new Date(a.purchase_date).getTime()
+        const dateB = new Date(b.purchase_date).getTime()
+        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA
+      })
+    } else if (sortField === 'amount') {
+      filtered.sort((a, b) => {
+        return sortOrder === 'asc'
+          ? a.total_amount - b.total_amount
+          : b.total_amount - a.total_amount
+      })
+    }
+
+    return filtered
   }
 
-  const filteredPurchases = purchases.filter((purchase) => {
-    const matchesSearch =
-      (purchase.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (purchase.suppliers?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (purchase.description || '').toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesStatus = statusFilter === "all" || purchase.status === statusFilter
-    return matchesSearch && matchesStatus
-  })
+  const filteredPurchases = applyFilters()
+
+  // Paginación
+  const totalPages = Math.ceil(filteredPurchases.length / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const paginatedPurchases = filteredPurchases.slice(startIndex, endIndex)
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const clearFilters = () => {
+    setStatusFilter("all")
+    setDateFrom("")
+    setDateTo("")
+    setSortField(null)
+    setSortOrder('desc')
+    setCurrentPage(1)
+  }
+
+  const hasActiveFilters = statusFilter !== "all" || dateFrom || dateTo || sortField !== null
 
   // Cálculos de estadísticas
   const totalPurchases = purchases.length
@@ -205,82 +280,205 @@ export default function PurchasesPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
             <input
               type="text"
-              placeholder="Buscar"
+              placeholder="Buscar compra, proveedor o descripción..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value)
+                setCurrentPage(1)
+              }}
               className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             />
           </div>
 
-          <div className="relative" ref={statusMenuRef}>
+          <div className="relative" ref={filterMenuRef}>
             <button
-              onClick={() => setOpenStatusMenu(!openStatusMenu)}
+              onClick={() => setOpenFilterMenu(!openFilterMenu)}
               className={cn(
-                "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer",
-                statusFilter !== "all" && "border-blue-500 bg-blue-50"
+                "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap",
+                hasActiveFilters && "border-blue-500 bg-blue-50"
               )}
             >
               <Filter size={18} />
-              {getStatusLabel()}
+              Ordenar y Filtrar
+              {hasActiveFilters && (
+                <span className="ml-1 px-2 py-0.5 bg-blue-600 text-white text-xs rounded-full">
+                  {[statusFilter !== "all", dateFrom, dateTo, sortField !== null].filter(Boolean).length}
+                </span>
+              )}
               <ChevronDown size={18} />
             </button>
 
-            {openStatusMenu && (
-              <div className="absolute left-0 top-full mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-10">
-                <button
-                  onClick={() => {
-                    setStatusFilter("all")
-                    setOpenStatusMenu(false)
-                  }}
-                  className={cn(
-                    "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer",
-                    statusFilter === "all" && "bg-blue-50 text-blue-600 font-medium"
-                  )}
-                >
-                  Todos los estados
-                </button>
-                <button
-                  onClick={() => {
-                    setStatusFilter("paid")
-                    setOpenStatusMenu(false)
-                  }}
-                  className={cn(
-                    "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer",
-                    (statusFilter === "paid" || statusFilter === "completed") && "bg-blue-50 text-blue-600 font-medium"
-                  )}
-                >
-                  Pagadas
-                </button>
-                <button
-                  onClick={() => {
-                    setStatusFilter("unpaid")
-                    setOpenStatusMenu(false)
-                  }}
-                  className={cn(
-                    "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer",
-                    (statusFilter === "unpaid" || statusFilter === "pending") && "bg-blue-50 text-blue-600 font-medium"
-                  )}
-                >
-                  Por Pagar
-                </button>
-                <button
-                  onClick={() => {
-                    setStatusFilter("cancelled")
-                    setOpenStatusMenu(false)
-                  }}
-                  className={cn(
-                    "w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer",
-                    statusFilter === "cancelled" && "bg-blue-50 text-blue-600 font-medium"
-                  )}
-                >
-                  Canceladas
-                </button>
+            {openFilterMenu && (
+              <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-lg shadow-xl border border-gray-200 z-50">
+                <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-900">Ordenar y Filtrar</h3>
+                  <button
+                    onClick={() => setOpenFilterMenu(false)}
+                    className="text-gray-400 hover:text-gray-600 cursor-pointer"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="p-4 space-y-4 max-h-[500px] overflow-y-auto">
+                  {/* Ordenar */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Ordenar por</label>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => {
+                          if (sortField === 'date' && sortOrder === 'desc') {
+                            setSortOrder('asc')
+                          } else {
+                            setSortField('date')
+                            setSortOrder('desc')
+                          }
+                          setCurrentPage(1)
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg border transition-colors",
+                          sortField === 'date'
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        Fecha {sortField === 'date' && (sortOrder === 'asc' ? '(Ascendente)' : '(Descendente)')}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (sortField === 'amount' && sortOrder === 'desc') {
+                            setSortOrder('asc')
+                          } else {
+                            setSortField('amount')
+                            setSortOrder('desc')
+                          }
+                          setCurrentPage(1)
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg border transition-colors",
+                          sortField === 'amount'
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        Monto {sortField === 'amount' && (sortOrder === 'asc' ? '(Menor a Mayor)' : '(Mayor a Menor)')}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filtrar por Estado */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Estado</label>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => {
+                          setStatusFilter("all")
+                          setCurrentPage(1)
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg border transition-colors",
+                          statusFilter === "all"
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        Todos
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStatusFilter("paid")
+                          setCurrentPage(1)
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg border transition-colors",
+                          statusFilter === "paid"
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        Pagado
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStatusFilter("unpaid")
+                          setCurrentPage(1)
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg border transition-colors",
+                          statusFilter === "unpaid"
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        Por Pagar
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filtrar por Rango de Fechas */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Rango de Fechas</label>
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Desde</label>
+                        <Input
+                          type="date"
+                          value={dateFrom}
+                          onChange={(e) => {
+                            setDateFrom(e.target.value)
+                            setCurrentPage(1)
+                          }}
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Hasta</label>
+                        <Input
+                          type="date"
+                          value={dateTo}
+                          onChange={(e) => {
+                            setDateTo(e.target.value)
+                            setCurrentPage(1)
+                          }}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 border-t border-gray-200 flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      clearFilters()
+                      setOpenFilterMenu(false)
+                    }}
+                    className="flex-1"
+                  >
+                    Limpiar
+                  </Button>
+                  <Button
+                    onClick={() => setOpenFilterMenu(false)}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700"
+                  >
+                    Aplicar
+                  </Button>
+                </div>
               </div>
             )}
           </div>
 
+          <button
+            onClick={() => toast.info("Función de subir factura próximamente")}
+            className="px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+          >
+            <Upload size={18} />
+            Subir factura
+          </button>
+
           <Link href="/purchases/create">
-            <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm cursor-pointer">
+            <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm cursor-pointer whitespace-nowrap">
               <Plus className="inline-block mr-2" size={18} />
               Nueva Compra
             </button>
@@ -305,7 +503,7 @@ export default function PurchasesPage() {
               <div className="text-6xl mb-4">🛒</div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">No hay compras</h3>
               <p className="text-gray-500 mb-4">
-                {searchTerm || statusFilter !== "all"
+                {searchTerm || hasActiveFilters
                   ? "No se encontraron compras con los filtros aplicados"
                   : "Comienza registrando tu primera compra"}
               </p>
@@ -317,7 +515,8 @@ export default function PurchasesPage() {
               </Link>
             </div>
           ) : (
-            filteredPurchases.map((purchase) => (
+            <>
+              {paginatedPurchases.map((purchase) => (
               <div
                 key={purchase.id}
                 className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 hover:bg-gray-50 items-center transition-colors"
@@ -389,12 +588,83 @@ export default function PurchasesPage() {
                   </div>
                 </div>
               </div>
-            ))
+              ))}
+
+              {/* Paginación */}
+              {totalPages > 1 && (
+                <div className="border-t border-gray-200 px-4 py-4 flex items-center justify-between">
+                  <div className="text-sm text-gray-600">
+                    Mostrando {startIndex + 1} - {Math.min(endIndex, filteredPurchases.length)} de {filteredPurchases.length} compras
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage === 1}
+                      className={cn(
+                        "p-2 rounded-lg border transition-colors",
+                        currentPage === 1
+                          ? "border-gray-200 text-gray-400 cursor-not-allowed"
+                          : "border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
+                      )}
+                    >
+                      <ChevronLeft size={20} />
+                    </button>
+
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter(page => {
+                        // Show first page, last page, current page, and pages around current
+                        return (
+                          page === 1 ||
+                          page === totalPages ||
+                          Math.abs(page - currentPage) <= 1
+                        )
+                      })
+                      .map((page, index, array) => {
+                        // Add ellipsis if there's a gap
+                        const prevPage = array[index - 1]
+                        const showEllipsis = prevPage && page - prevPage > 1
+
+                        return (
+                          <React.Fragment key={page}>
+                            {showEllipsis && (
+                              <span className="px-2 text-gray-400">...</span>
+                            )}
+                            <button
+                              onClick={() => handlePageChange(page)}
+                              className={cn(
+                                "min-w-[40px] h-10 px-3 rounded-lg border transition-colors",
+                                currentPage === page
+                                  ? "border-blue-500 bg-blue-50 text-blue-700 font-medium"
+                                  : "border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
+                              )}
+                            >
+                              {page}
+                            </button>
+                          </React.Fragment>
+                        )
+                      })}
+
+                    <button
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage === totalPages}
+                      className={cn(
+                        "p-2 rounded-lg border transition-colors",
+                        currentPage === totalPages
+                          ? "border-gray-200 text-gray-400 cursor-not-allowed"
+                          : "border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
+                      )}
+                    >
+                      <ChevronRight size={20} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {/* Información de resultados */}
-        {filteredPurchases.length > 0 && (
+        {/* Información de resultados sin paginación */}
+        {filteredPurchases.length > 0 && totalPages <= 1 && (
           <div className="mt-4 text-sm text-gray-600 text-center">
             Mostrando {filteredPurchases.length} compra(s)
           </div>
