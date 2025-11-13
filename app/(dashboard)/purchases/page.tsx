@@ -11,6 +11,7 @@ import { DeleteConfirmationModal } from "@/components/ui/delete-confirmation-mod
 import { useDeleteModal } from "@/hooks/use-delete-modal"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { UploadInvoiceModal } from "@/components/purchases/UploadInvoiceModal"
 
 interface Purchase {
   id: string
@@ -42,6 +43,7 @@ export default function PurchasesPage() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
+  const [showUploadModal, setShowUploadModal] = useState(false)
 
   const { deleteModal, openDeleteModal, closeDeleteModal, setLoading: setDeleteLoading } = useDeleteModal()
   const menuRef = useRef<HTMLDivElement>(null)
@@ -210,6 +212,104 @@ export default function PurchasesPage() {
   }
 
   const hasActiveFilters = statusFilter !== "all" || dateFrom || dateTo || sortField !== null
+
+  const handleInvoiceSuccess = async (data: any) => {
+    try {
+      setLoading(true)
+
+      // Validar artículos contra inventario
+      const articles = await DatabaseService.getArticles()
+      const suppliers = await DatabaseService.getSuppliers()
+
+      // Buscar o crear proveedor
+      let supplier = suppliers?.find(s =>
+        s.name.toLowerCase().includes(data.supplier.toLowerCase()) ||
+        data.supplier.toLowerCase().includes(s.name.toLowerCase())
+      )
+
+      if (!supplier) {
+        toast.info(`Proveedor "${data.supplier}" no encontrado. Créalo primero en la sección de Proveedores.`)
+        setLoading(false)
+        return
+      }
+
+      // Validar artículos y preparar items
+      const validatedItems = []
+      const missingArticles = []
+
+      for (const item of data.items) {
+        const article = articles?.find(a =>
+          a.name.toLowerCase().includes(item.name.toLowerCase()) ||
+          item.name.toLowerCase().includes(a.name.toLowerCase())
+        )
+
+        if (article) {
+          validatedItems.push({
+            article_id: article.id,
+            quantity: item.quantity,
+            unit: article.unit_id || article.default_unit_id,
+            unit_cost: item.price,
+            total_cost: item.total
+          })
+        } else {
+          missingArticles.push(item.name)
+        }
+      }
+
+      if (missingArticles.length > 0) {
+        toast.error(
+          `Los siguientes artículos no existen en tu inventario: ${missingArticles.join(', ')}. Por favor créalos primero.`,
+          { duration: 8000 }
+        )
+        setLoading(false)
+        return
+      }
+
+      // Crear compra
+      const purchaseData = {
+        name: data.purchaseName,
+        supplier_id: supplier.id,
+        purchase_date: data.date,
+        total_amount: data.subtotal,
+        status: data.status,
+        items: validatedItems
+      }
+
+      await DatabaseService.createPurchase(purchaseData)
+
+      // Actualizar inventario automáticamente
+      for (const item of data.items) {
+        const article = articles?.find(a =>
+          a.name.toLowerCase().includes(item.name.toLowerCase()) ||
+          item.name.toLowerCase().includes(a.name.toLowerCase())
+        )
+
+        if (article) {
+          const currentStock = article.current_stock || 0
+          const currentPrice = article.cost_per_unit || 0
+          const newStock = currentStock + item.quantity
+
+          // Calcular precio promedio ponderado
+          const totalCurrentValue = currentStock * currentPrice
+          const totalNewValue = item.quantity * (item.price / item.quantity)
+          const averagePrice = newStock > 0 ? (totalCurrentValue + totalNewValue) / newStock : (item.price / item.quantity)
+
+          await DatabaseService.updateIngredient(article.id, {
+            current_stock: newStock,
+            cost_per_unit: averagePrice
+          })
+        }
+      }
+
+      toast.success("Compra creada exitosamente desde la factura")
+      await loadPurchases()
+    } catch (error: any) {
+      console.error('Error creating purchase from invoice:', error)
+      toast.error(error.message || "Error al crear la compra")
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // Cálculos de estadísticas
   const totalPurchases = purchases.length
@@ -470,7 +570,7 @@ export default function PurchasesPage() {
           </div>
 
           <button
-            onClick={() => toast.info("Función de subir factura próximamente")}
+            onClick={() => setShowUploadModal(true)}
             className="px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
           >
             <Upload size={18} />
@@ -679,6 +779,12 @@ export default function PurchasesPage() {
         description="¿Estás seguro de que deseas eliminar la compra"
         itemName={deleteModal.item?.name || 'Sin nombre'}
         isLoading={deleteModal.isLoading}
+      />
+
+      <UploadInvoiceModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onSuccess={handleInvoiceSuccess}
       />
     </div>
   )
