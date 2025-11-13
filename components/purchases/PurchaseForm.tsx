@@ -32,8 +32,8 @@ interface PurchaseItem {
   unit: string
   unitId: string
   unitSymbol: string
-  quantity: number
-  price: number
+  quantity: number | string
+  price: number | string
   total: number
   availableUnits: Unit[]
 }
@@ -302,7 +302,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     setItems(items.filter(item => item.id !== id))
   }
 
-  const updateItemQuantity = (id: string, quantity: number) => {
+  const updateItemQuantity = (id: string, quantity: number | string) => {
     setItems(items.map(item => {
       if (item.id === id) {
         // Quantity is only for inventory update, doesn't change total
@@ -312,11 +312,12 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     }))
   }
 
-  const updateItemPrice = (id: string, price: number) => {
+  const updateItemPrice = (id: string, price: number | string) => {
     setItems(items.map(item => {
       if (item.id === id) {
         // Price is the total, not unit price
-        return { ...item, price: price, total: price }
+        const numPrice = typeof price === 'string' ? parseFloat(price) || 0 : price
+        return { ...item, price: price, total: numPrice }
       }
       return item
     }))
@@ -389,7 +390,11 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
       return
     }
 
-    const hasValidItems = items.every(item => item.quantity > 0 && item.price > 0)
+    const hasValidItems = items.every(item => {
+      const qty = typeof item.quantity === 'string' ? parseFloat(item.quantity) : item.quantity
+      const prc = typeof item.price === 'string' ? parseFloat(item.price) : item.price
+      return qty > 0 && prc > 0
+    })
     if (!hasValidItems) {
       toast.error("Todos los artículos deben tener cantidad y precio válidos")
       return
@@ -407,9 +412,9 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
         status: formData.status,
         items: items.map(item => ({
           article_id: item.articleId,
-          quantity: item.quantity,
+          quantity: typeof item.quantity === 'string' ? parseFloat(item.quantity) : item.quantity,
           unit: item.unitId,
-          unit_cost: item.price,
+          unit_cost: typeof item.price === 'string' ? parseFloat(item.price) : item.price,
           total_cost: item.total
         }))
       }
@@ -440,9 +445,9 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
         const purchaseItems = items.map(item => ({
           purchase_id: purchaseId,
           article_id: item.articleId,
-          quantity: item.quantity,
+          quantity: typeof item.quantity === 'string' ? parseFloat(item.quantity) : item.quantity,
           unit_id: item.unitId,
-          unit_cost: item.price,
+          unit_cost: typeof item.price === 'string' ? parseFloat(item.price) : item.price,
           total_cost: item.total
         }))
 
@@ -481,16 +486,20 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
 
       const currentStock = article.current_stock || 0
       const currentPrice = article.cost_per_unit || 0
-      let quantityToAdd = item.quantity
+
+      // Convert to number if string
+      const itemQuantity = typeof item.quantity === 'string' ? parseFloat(item.quantity) : item.quantity
+      const itemPrice = typeof item.price === 'string' ? parseFloat(item.price) : item.price
+      let quantityToAdd = itemQuantity
 
       // Calculate unit price from total price and quantity
-      const unitPrice = item.quantity > 0 ? item.price / item.quantity : 0
+      const unitPrice = itemQuantity > 0 ? itemPrice / itemQuantity : 0
 
       // Convertir cantidad a unidad base del artículo si es necesario
       const articleBaseUnitId = article.unit_id || article.default_unit_id
 
       if (articleBaseUnitId && item.unitId !== articleBaseUnitId) {
-        const conversion = await DatabaseService.convertUnits(item.quantity, item.unitId, articleBaseUnitId)
+        const conversion = await DatabaseService.convertUnits(itemQuantity, item.unitId, articleBaseUnitId)
 
         if (conversion.success && conversion.convertedValue !== undefined) {
           quantityToAdd = conversion.convertedValue
@@ -517,7 +526,11 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     formData.name.trim() &&
     selectedSupplier &&
     items.length > 0 &&
-    items.every(item => item.quantity > 0 && item.price > 0) &&
+    items.every(item => {
+      const qty = typeof item.quantity === 'string' ? parseFloat(item.quantity) : item.quantity
+      const prc = typeof item.price === 'string' ? parseFloat(item.price) : item.price
+      return qty > 0 && prc > 0
+    }) &&
     hasChanges()
   )
 
@@ -943,7 +956,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                           <input
                             type="text"
                             inputMode="decimal"
-                            value={item.quantity || ''}
+                            value={item.quantity === 0 ? '' : item.quantity}
                             onChange={(e) => {
                               let value = e.target.value.replace(/[^0-9.]/g, '')
 
@@ -958,7 +971,8 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                                 value = parts[0] + '.' + parts[1].substring(0, 3)
                               }
 
-                              updateItemQuantity(item.id, value ? Number(value) : 0)
+                              // Guardar como string para permitir escribir "0."
+                              updateItemQuantity(item.id, value === '' ? 0 : value)
                             }}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-600 text-sm"
                             placeholder="0.000"
@@ -1029,7 +1043,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                           <input
                             type="text"
                             inputMode="decimal"
-                            value={item.price || ''}
+                            value={item.price === 0 ? '' : item.price}
                             onChange={(e) => {
                               let value = e.target.value.replace(/[^0-9.]/g, '')
 
@@ -1044,7 +1058,8 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                                 value = parts[0] + '.' + parts[1].substring(0, 2)
                               }
 
-                              updateItemPrice(item.id, value ? Number(value) : 0)
+                              // Guardar como string para permitir escribir "0."
+                              updateItemPrice(item.id, value === '' ? 0 : value)
                             }}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-600 text-sm"
                             placeholder="0.00"

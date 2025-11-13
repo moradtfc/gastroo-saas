@@ -323,7 +323,7 @@ export default function PurchasesPage() {
                 className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 hover:bg-gray-50 items-center transition-colors"
               >
                 <div className="col-span-3">
-                  <span className="font-semibold text-gray-900">
+                  <span className="text-gray-900">
                     {purchase.name}
                   </span>
                 </div>
@@ -338,7 +338,7 @@ export default function PurchasesPage() {
                   {purchase.suppliers?.name || 'Sin proveedor'}
                 </div>
 
-                <div className="col-span-2 text-gray-900 font-semibold">
+                <div className="col-span-2 text-gray-900">
                   €{(purchase.total_amount || 0).toFixed(2)}
                 </div>
 
