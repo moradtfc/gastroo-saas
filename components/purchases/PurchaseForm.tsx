@@ -945,13 +945,23 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                             inputMode="decimal"
                             value={item.quantity || ''}
                             onChange={(e) => {
-                              const value = e.target.value.replace(/[^0-9.]/g, '')
+                              let value = e.target.value.replace(/[^0-9.]/g, '')
+
+                              // Permitir solo un punto decimal
                               const parts = value.split('.')
-                              const sanitized = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : value
-                              updateItemQuantity(item.id, sanitized ? Number(sanitized) : 0)
+                              if (parts.length > 2) {
+                                value = parts[0] + '.' + parts.slice(1).join('')
+                              }
+
+                              // Limitar a 3 decimales
+                              if (parts.length === 2 && parts[1].length > 3) {
+                                value = parts[0] + '.' + parts[1].substring(0, 3)
+                              }
+
+                              updateItemQuantity(item.id, value ? Number(value) : 0)
                             }}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-600 text-sm"
-                            placeholder="0"
+                            placeholder="0.000"
                           />
                         </div>
 
@@ -1021,10 +1031,20 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                             inputMode="decimal"
                             value={item.price || ''}
                             onChange={(e) => {
-                              const value = e.target.value.replace(/[^0-9.]/g, '')
+                              let value = e.target.value.replace(/[^0-9.]/g, '')
+
+                              // Permitir solo un punto decimal
                               const parts = value.split('.')
-                              const sanitized = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : value
-                              updateItemPrice(item.id, sanitized ? Number(sanitized) : 0)
+                              if (parts.length > 2) {
+                                value = parts[0] + '.' + parts.slice(1).join('')
+                              }
+
+                              // Limitar a 2 decimales para dinero
+                              if (parts.length === 2 && parts[1].length > 2) {
+                                value = parts[0] + '.' + parts[1].substring(0, 2)
+                              }
+
+                              updateItemPrice(item.id, value ? Number(value) : 0)
                             }}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-600 text-sm"
                             placeholder="0.00"

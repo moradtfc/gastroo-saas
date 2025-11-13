@@ -293,9 +293,9 @@ export default function PurchasesPage() {
           <div className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 bg-gray-50 font-medium text-sm text-gray-700">
             <div className="col-span-3">Nombre</div>
             <div className="col-span-2">Fecha</div>
-            <div className="col-span-2">Proveedor</div>
+            <div className="col-span-3">Proveedor</div>
             <div className="col-span-2">Total</div>
-            <div className="col-span-2">Estado</div>
+            <div className="col-span-1">Estado</div>
             <div className="col-span-1"></div>
           </div>
 
@@ -323,12 +323,9 @@ export default function PurchasesPage() {
                 className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 hover:bg-gray-50 items-center transition-colors"
               >
                 <div className="col-span-3">
-                  <Link
-                    href={`/purchases/${purchase.id}`}
-                    className="font-semibold text-blue-600 hover:text-blue-800 hover:underline transition-colors"
-                  >
+                  <span className="font-semibold text-gray-900">
                     {purchase.name}
-                  </Link>
+                  </span>
                 </div>
 
                 <div className="col-span-2 flex items-center gap-2 text-gray-700">
@@ -336,7 +333,7 @@ export default function PurchasesPage() {
                   {new Date(purchase.purchase_date).toLocaleDateString('es-ES')}
                 </div>
 
-                <div className="col-span-2 flex items-center gap-2 text-gray-700">
+                <div className="col-span-3 flex items-center gap-2 text-gray-700">
                   <Building size={16} className="text-gray-400" />
                   {purchase.suppliers?.name || 'Sin proveedor'}
                 </div>
@@ -345,7 +342,7 @@ export default function PurchasesPage() {
                   €{(purchase.total_amount || 0).toFixed(2)}
                 </div>
 
-                <div className="col-span-2">
+                <div className="col-span-1">
                   {getStatusBadge(purchase.status)}
                 </div>
 
