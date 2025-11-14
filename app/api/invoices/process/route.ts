@@ -14,6 +14,7 @@ interface InvoiceData {
   date: string
   items: InvoiceItem[]
   subtotal: number
+  total: number
   currency: string
 }
 
@@ -33,7 +34,10 @@ function parseInvoiceText(text: string): InvoiceData {
   // Extraer items (productos con cantidades y precios)
   const items = extractItems(lines, currency)
 
-  // Calcular subtotal
+  // Extraer el total de la factura (TOTAL ENTREGADO, TOTAL A PAGAR, etc.)
+  const total = extractTotal(text)
+
+  // Calcular subtotal de los items
   const subtotal = items.reduce((sum, item) => sum + item.total, 0)
 
   return {
@@ -41,6 +45,7 @@ function parseInvoiceText(text: string): InvoiceData {
     date,
     items,
     subtotal,
+    total,
     currency
   }
 }
@@ -120,6 +125,36 @@ function extractCurrency(text: string): string {
   return '€' // Por defecto
 }
 
+// Extrae el total de la factura (TOTAL ENTREGADO, TOTAL A PAGAR, etc.)
+function extractTotal(text: string): number {
+  const lines = text.split('\n')
+
+  // Buscar líneas que contengan "TOTAL ENTREGADO", "TOTAL A PAGAR", "IMPORTE TOTAL", etc.
+  const totalKeywords = [
+    /TOTAL\s+ENTREGADO[^\d]*(\d+[.,]\d{2})/i,
+    /TOTAL\s+A\s+PAGAR[^\d]*(\d+[.,]\d{2})/i,
+    /IMPORTE\s+TOTAL[^\d]*(\d+[.,]\d{2})/i,
+    /TOTAL[^\d]*(\d+[.,]\d{2})\s*[€$£]\s*$/i
+  ]
+
+  for (const line of lines) {
+    for (const pattern of totalKeywords) {
+      const match = line.match(pattern)
+      if (match) {
+        const totalStr = match[1].replace(',', '.')
+        const total = parseFloat(totalStr)
+        if (!isNaN(total)) {
+          console.log(`Total extraído: ${total} € de línea: "${line.trim()}"`)
+          return total
+        }
+      }
+    }
+  }
+
+  // Si no encontramos el total, devolver 0
+  return 0
+}
+
 // Extrae los items de la factura
 function extractItems(lines: string[], currency: string): InvoiceItem[] {
   const items: InvoiceItem[] = []
@@ -159,13 +194,15 @@ function extractItems(lines: string[], currency: string): InvoiceItem[] {
 
     if (hasPriceAtEnd && numbers.length >= 1) {
       // Esta línea tiene un precio, por lo tanto marca el FIN de un producto
-      const possibleQuantity = numbers.find(n => n > 0 && n < 1000)
-      const possiblePrices = numbers.filter(n => n >= 0)
 
       // Extraer nombre del producto de la línea actual
       let name = extractProductName(line, numbers)
-      let quantity = possibleQuantity || 1
+      let quantity = 1
       let unit = extractUnit(line)
+
+      // Determinar precio y total
+      let price = 0
+      let total = 0
 
       // MANEJO DE PRODUCTOS MULTI-LÍNEA:
       // Si el precio está aquí pero el nombre es muy corto/vacío,
@@ -186,21 +223,38 @@ function extractItems(lines: string[], currency: string): InvoiceItem[] {
         }
       }
 
-      if (name && name.length > 2 && possiblePrices.length >= 1) {
-        // Determinar precio y total
-        let price = 0
-        let total = 0
+      // Determinar cantidad, precio unitario y precio total
+      // Patrón común: "6 Un x 1,15 £/Un C 6,90 €" → cantidad=6, precio=1.15, total=6.90
+      const quantityMatch = line.match(/(\d+)\s*Un\s*x\s*(\d+[.,]\d{2})/i)
 
-        if (possiblePrices.length >= 2) {
-          // Si hay 2+ precios, el último suele ser el total
-          total = possiblePrices[possiblePrices.length - 1]
-          price = possiblePrices.length > 1 ? possiblePrices[possiblePrices.length - 2] : total / quantity
-        } else {
-          // Si solo hay 1 precio, es el total
-          total = possiblePrices[0]
+      if (quantityMatch) {
+        // Línea con formato explícito de cantidad
+        quantity = parseInt(quantityMatch[1])
+        price = parseFloat(quantityMatch[2].replace(',', '.'))
+        total = numbers[numbers.length - 1] // El último número es el total
+      } else if (numbers.length >= 2) {
+        // Si hay múltiples números, el último es el total
+        total = numbers[numbers.length - 1]
+
+        // Buscar un número que pueda ser cantidad (pequeño, entero o casi entero, < 100)
+        const possibleQty = numbers.find(n => n > 0 && n < 100 && (n === Math.floor(n) || n < 20))
+
+        if (possibleQty && possibleQty !== total) {
+          quantity = possibleQty
           price = total / quantity
+        } else {
+          // No hay cantidad explícita, cantidad = 1
+          quantity = 1
+          price = total
         }
+      } else {
+        // Solo hay 1 número: es el precio total, cantidad = 1
+        total = numbers[0]
+        price = total
+        quantity = 1
+      }
 
+      if (name && name.length > 2) {
         items.push({
           name: name.trim(),
           quantity: quantity,
@@ -247,25 +301,34 @@ function extractProductName(line: string, numbers: number[]): string {
   let name = line
 
   // Remover símbolos de moneda
-  name = name.replace(/[€$£]/g, '')
+  name = name.replace(/[€$£]/g, ' ')
 
-  // Remover los números encontrados
+  // Remover todos los números con decimales (ej: 1,89 o 1.89)
+  name = name.replace(/\d+[.,]\d+/g, ' ')
+
+  // Remover números enteros que sean parte de precios/cantidades
   numbers.forEach(num => {
-    const numStr = num.toString().replace('.', '[.,]')
-    name = name.replace(new RegExp(numStr, 'g'), '')
+    // Crear patrón que capture el número con sus posibles decimales
+    const numInt = Math.floor(num)
+    name = name.replace(new RegExp(`\\b${numInt}\\b`, 'g'), ' ')
   })
 
+  // Remover patrones de cantidad (ej: "6 Un x" o "Un x")
+  name = name.replace(/\d+\s*Un\s*x\s*\d+[.,]\d+/gi, ' ')
+  name = name.replace(/Un\s*x/gi, ' ')
+
   // Remover unidades comunes
-  const units = ['kg', 'g', 'l', 'ml', 'ud', 'unidad', 'unidades', 'pcs', 'pz', 'un', 'x']
+  const units = ['kg', 'g', 'l', 'ml', 'ud', 'unidad', 'unidades', 'pcs', 'pz']
   units.forEach(unit => {
-    name = name.replace(new RegExp(`\\b${unit}\\b`, 'gi'), '')
+    name = name.replace(new RegExp(`\\b${unit}\\b`, 'gi'), ' ')
   })
 
   // Remover patrones comunes no deseados
   name = name.replace(/[C\-—]+\s*$/g, '') // Remover guiones y letras sueltas al final
-  name = name.replace(/\b(un|x)\b/gi, '') // Remover "un" y "x" sueltos
+  name = name.replace(/\s+[C\-—]+\s*/g, ' ') // Remover guiones y letras sueltas intermedias
+  name = name.replace(/\s*\/\s*/g, ' ') // Remover barras
 
-  // Limpiar espacios y caracteres especiales
+  // Limpiar espacios múltiples y espacios al inicio/final
   name = name.replace(/\s+/g, ' ').trim()
 
   return name
