@@ -124,12 +124,25 @@ function extractCurrency(text: string): string {
 function extractItems(lines: string[], currency: string): InvoiceItem[] {
   const items: InvoiceItem[] = []
 
+  // REGLA CLAVE: Solo procesar líneas ANTES de "TOTAL"
+  // Encontrar el índice de la primera línea que contiene "TOTAL" en mayúscula
+  const totalIndex = lines.findIndex(line => {
+    const upperLine = line.toUpperCase()
+    return /\bTOTAL\b/.test(upperLine)
+  })
+
+  // Si encontramos "TOTAL", solo procesar líneas antes de ese índice
+  // Si no encontramos "TOTAL", procesar todas las líneas
+  const productLines = totalIndex !== -1 ? lines.slice(0, totalIndex) : lines
+
+  console.log(`Procesando ${productLines.length} líneas de productos (antes de TOTAL en línea ${totalIndex})`)
+
   // Patrones para identificar líneas de producto
   // Buscar líneas que contengan cantidad y precio
   const pricePattern = new RegExp(`[${currency}€$£]?\\s*([\\d]+[.,]?[\\d]*)\\s*${currency}?`, 'g')
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
+  for (let i = 0; i < productLines.length; i++) {
+    const line = productLines[i]
 
     // Buscar números que parezcan precios (con o sin símbolo de moneda)
     const numbers = extractNumbers(line)
@@ -142,12 +155,30 @@ function extractItems(lines: string[], currency: string): InvoiceItem[] {
 
     if (numbers.length >= 2) {
       // Intentar identificar cantidad y precios
-      const possibleQuantity = numbers.find(n => n > 0 && n < 1000 && !line.includes('Total'))
+      const possibleQuantity = numbers.find(n => n > 0 && n < 1000)
       const possiblePrices = numbers.filter(n => n >= 0)
 
       if (possibleQuantity !== undefined && possiblePrices.length >= 1) {
         // Extraer nombre del producto (texto antes de los números)
-        const name = extractProductName(line, numbers)
+        let name = extractProductName(line, numbers)
+
+        // MANEJO DE PRODUCTOS MULTI-LÍNEA:
+        // Si el nombre es muy corto (< 5 caracteres), puede ser que el nombre
+        // esté en la línea anterior (ej: "ZANAHORTA BOLSA 1K" + "6 Un x 1,15 £/Un C 6,90 €")
+        if (name.length < 5 && i > 0) {
+          const previousLine = productLines[i - 1]
+          const previousNumbers = extractNumbers(previousLine)
+
+          // Si la línea anterior tiene texto pero no tiene precios (o muy pocos números)
+          if (previousNumbers.length <= 1) {
+            const previousName = extractProductName(previousLine, previousNumbers)
+            if (previousName.length > 3) {
+              // Combinar el nombre de la línea anterior con el actual
+              name = previousName
+              console.log(`Producto multi-línea detectado: "${name}" con datos en línea siguiente`)
+            }
+          }
+        }
 
         if (name && name.length > 2) {
           // Determinar precio y total
@@ -181,7 +212,7 @@ function extractItems(lines: string[], currency: string): InvoiceItem[] {
 
   // Si no se encontraron items, intentar un parsing más agresivo
   if (items.length === 0) {
-    return fallbackItemExtraction(lines, currency)
+    return fallbackItemExtraction(productLines, currency)
   }
 
   return items
@@ -223,10 +254,14 @@ function extractProductName(line: string, numbers: number[]): string {
   })
 
   // Remover unidades comunes
-  const units = ['kg', 'g', 'l', 'ml', 'ud', 'unidad', 'unidades', 'pcs', 'pz']
+  const units = ['kg', 'g', 'l', 'ml', 'ud', 'unidad', 'unidades', 'pcs', 'pz', 'un', 'x']
   units.forEach(unit => {
     name = name.replace(new RegExp(`\\b${unit}\\b`, 'gi'), '')
   })
+
+  // Remover patrones comunes no deseados
+  name = name.replace(/[C\-—]+\s*$/g, '') // Remover guiones y letras sueltas al final
+  name = name.replace(/\b(un|x)\b/gi, '') // Remover "un" y "x" sueltos
 
   // Limpiar espacios y caracteres especiales
   name = name.replace(/\s+/g, ' ').trim()
@@ -264,7 +299,9 @@ function extractUnit(line: string): string {
 function fallbackItemExtraction(lines: string[], currency: string): InvoiceItem[] {
   const items: InvoiceItem[] = []
 
-  // Buscar líneas que contengan al menos un precio
+  console.log('Ejecutando extracción fallback con líneas filtradas')
+
+  // Buscar líneas que contengan al menos un precio (formato con decimales)
   for (const line of lines) {
     if (/\d+[.,]\d{2}/.test(line)) {
       const numbers = extractNumbers(line)
@@ -272,13 +309,22 @@ function fallbackItemExtraction(lines: string[], currency: string): InvoiceItem[
       if (numbers.length > 0) {
         const name = extractProductName(line, numbers)
 
-        if (name.length > 2 && !name.toLowerCase().includes('total')) {
+        // Filtrar nombres que sean demasiado cortos o contengan palabras clave no deseadas
+        const invalidKeywords = ['subtotal', 'impuesto', 'iva', 'tax', 'descuento', 'entregado', 'cambio']
+        const hasInvalidKeyword = invalidKeywords.some(keyword =>
+          name.toLowerCase().includes(keyword)
+        )
+
+        if (name.length > 2 && !hasInvalidKeyword) {
+          // El último número suele ser el precio total del producto
+          const price = numbers[numbers.length - 1]
+
           items.push({
             name: name.trim(),
             quantity: 1,
             unit: 'unidad',
-            price: numbers[numbers.length - 1],
-            total: numbers[numbers.length - 1]
+            price: price,
+            total: price
           })
         }
       }
