@@ -1,42 +1,82 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
+import { Search, Filter, ChevronDown, Plus, MoreVertical, Calendar, Building, Package, Eye, Edit, Trash2, Upload, ChevronLeft, ChevronRight, X } from "lucide-react"
 import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Search, Eye, Edit, Trash2, Calendar, Building, Package, AlertTriangle } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { DatabaseService } from "@/lib/database"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 import { DeleteConfirmationModal } from "@/components/ui/delete-confirmation-modal"
 import { useDeleteModal } from "@/hooks/use-delete-modal"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { UploadInvoiceModal } from "@/components/purchases/UploadInvoiceModal"
+
+interface Purchase {
+  id: string
+  name: string
+  description?: string | null
+  purchase_date: string
+  total_amount: number
+  status: string
+  notes?: string | null
+  suppliers?: {
+    name: string
+  } | null
+}
+
+type SortField = 'date' | 'amount' | null
+type SortOrder = 'asc' | 'desc'
 
 export default function PurchasesPage() {
-  const [purchases, setPurchases] = useState<any[]>([])
+  const router = useRouter()
+  const [purchases, setPurchases] = useState<Purchase[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
-  const [supplierFilter, setSupplierFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [showBanner, setShowBanner] = useState(true)
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [openFilterMenu, setOpenFilterMenu] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [sortField, setSortField] = useState<SortField>(null)
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
+  const [showUploadModal, setShowUploadModal] = useState(false)
+
   const { deleteModal, openDeleteModal, closeDeleteModal, setLoading: setDeleteLoading } = useDeleteModal()
+  const menuRef = useRef<HTMLDivElement>(null)
+  const filterMenuRef = useRef<HTMLDivElement>(null)
+
+  const itemsPerPage = 12
 
   useEffect(() => {
     loadPurchases()
   }, [])
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenMenuId(null)
+      }
+      if (filterMenuRef.current && !filterMenuRef.current.contains(event.target as Node)) {
+        setOpenFilterMenu(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
   const loadPurchases = async () => {
     try {
       setLoading(true)
-      setError(null)
       const data = await DatabaseService.getPurchases()
       setPurchases(data || [])
     } catch (error) {
-      console.error('Error loading purchases:', error)
-      setError('Error al cargar compras')
-      toast.error('Error al cargar compras')
+      console.error("Error loading purchases:", error)
+      toast.error("Error al cargar compras")
     } finally {
       setLoading(false)
     }
@@ -47,7 +87,7 @@ export default function PurchasesPage() {
 
     try {
       setDeleteLoading(true)
-      
+
       const { error } = await DatabaseService.supabase
         .from('purchases')
         .delete()
@@ -65,251 +105,686 @@ export default function PurchasesPage() {
     }
   }
 
-  const filteredPurchases = purchases.filter((purchase) => {
-    const matchesSearch = (purchase.suppliers?.name || '').toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesSupplier = supplierFilter === "all" || (purchase.suppliers?.name === supplierFilter)
-    const matchesStatus = statusFilter === "all" || purchase.status === statusFilter
-    return matchesSearch && matchesSupplier && matchesStatus
-  })
-
-  const suppliers = Array.from(new Set(purchases.map((purchase) => purchase.suppliers?.name).filter(Boolean)))
-  const totalSpent = purchases.reduce((sum, purchase) => sum + (purchase.total_amount || 0), 0)
-  const completedPurchases = purchases.filter((purchase) => purchase.status === "completed").length
-  const pendingPurchases = purchases.filter((purchase) => purchase.status === "pending").length
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
-      </div>
-    )
+  const toggleMenu = (id: string) => {
+    setOpenMenuId(openMenuId === id ? null : id)
   }
 
-  if (error) {
-    return (
-      <div className="p-8 space-y-8 bg-gradient-to-br from-background via-background to-secondary/5 min-h-screen">
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <Card className="w-full max-w-md">
-            <CardHeader className="text-center">
-              <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-              <CardTitle className="text-red-600">Error de Conexión</CardTitle>
-            </CardHeader>
-            <CardContent className="text-center space-y-4">
-              <p className="text-muted-foreground">{error}</p>
-              <Button onClick={loadPurchases} className="w-full">
-                Reintentar
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    )
+  const handleView = (purchase: Purchase) => {
+    router.push(`/purchases/${purchase.id}`)
+    setOpenMenuId(null)
+  }
+
+  const handleEdit = (purchase: Purchase) => {
+    router.push(`/purchases/${purchase.id}`)
+    setOpenMenuId(null)
   }
 
   const getStatusBadge = (status: string) => {
     switch (status) {
+      case "paid":
       case "completed":
-        return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Completada</Badge>
+        return <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full font-medium">Pagado</span>
+      case "unpaid":
       case "pending":
-        return <Badge variant="secondary">Pendiente</Badge>
+        return <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-medium">Por Pagar</span>
       case "cancelled":
-        return <Badge variant="destructive">Cancelada</Badge>
+        return <span className="px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full font-medium">Cancelada</span>
       default:
-        return <Badge variant="outline">Desconocido</Badge>
+        return <span className="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded-full font-medium">Desconocido</span>
     }
   }
 
+  const applyFilters = () => {
+    let filtered = [...purchases]
+
+    // Filtro de búsqueda
+    if (searchTerm) {
+      filtered = filtered.filter((purchase) =>
+        (purchase.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (purchase.suppliers?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (purchase.description || '').toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    }
+
+    // Filtro de estado
+    if (statusFilter !== "all") {
+      filtered = filtered.filter((purchase) => {
+        if (statusFilter === "paid") {
+          return purchase.status === "paid" || purchase.status === "completed"
+        }
+        if (statusFilter === "unpaid") {
+          return purchase.status === "unpaid" || purchase.status === "pending"
+        }
+        return purchase.status === statusFilter
+      })
+    }
+
+    // Filtro de rango de fechas
+    if (dateFrom) {
+      filtered = filtered.filter((purchase) =>
+        new Date(purchase.purchase_date) >= new Date(dateFrom)
+      )
+    }
+    if (dateTo) {
+      filtered = filtered.filter((purchase) =>
+        new Date(purchase.purchase_date) <= new Date(dateTo)
+      )
+    }
+
+    // Ordenamiento
+    if (sortField === 'date') {
+      filtered.sort((a, b) => {
+        const dateA = new Date(a.purchase_date).getTime()
+        const dateB = new Date(b.purchase_date).getTime()
+        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA
+      })
+    } else if (sortField === 'amount') {
+      filtered.sort((a, b) => {
+        return sortOrder === 'asc'
+          ? a.total_amount - b.total_amount
+          : b.total_amount - a.total_amount
+      })
+    }
+
+    return filtered
+  }
+
+  const filteredPurchases = applyFilters()
+
+  // Paginación
+  const totalPages = Math.ceil(filteredPurchases.length / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const paginatedPurchases = filteredPurchases.slice(startIndex, endIndex)
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const clearFilters = () => {
+    setStatusFilter("all")
+    setDateFrom("")
+    setDateTo("")
+    setSortField(null)
+    setSortOrder('desc')
+    setCurrentPage(1)
+  }
+
+  const hasActiveFilters = statusFilter !== "all" || dateFrom || dateTo || sortField !== null
+
+  const handleInvoiceSuccess = async (data: any) => {
+    try {
+      setLoading(true)
+
+      // Validar artículos contra inventario
+      const articles = await DatabaseService.getArticles()
+      const suppliers = await DatabaseService.getSuppliers()
+
+      // Buscar o crear proveedor
+      let supplier = suppliers?.find(s =>
+        s.name.toLowerCase().includes(data.supplier.toLowerCase()) ||
+        data.supplier.toLowerCase().includes(s.name.toLowerCase())
+      )
+
+      if (!supplier) {
+        toast.info(`Proveedor "${data.supplier}" no encontrado. Créalo primero en la sección de Proveedores.`)
+        setLoading(false)
+        return
+      }
+
+      // Validar artículos y preparar items
+      const validatedItems = []
+      const missingArticles = []
+
+      for (const item of data.items) {
+        const article = articles?.find(a =>
+          a.name.toLowerCase().includes(item.name.toLowerCase()) ||
+          item.name.toLowerCase().includes(a.name.toLowerCase())
+        )
+
+        if (article) {
+          validatedItems.push({
+            article_id: article.id,
+            quantity: item.quantity,
+            unit: article.unit_id || article.default_unit_id,
+            unit_cost: item.price,
+            total_cost: item.total
+          })
+        } else {
+          missingArticles.push(item.name)
+        }
+      }
+
+      if (missingArticles.length > 0) {
+        toast.error(
+          `Los siguientes artículos no existen en tu inventario: ${missingArticles.join(', ')}. Por favor créalos primero.`,
+          { duration: 8000 }
+        )
+        setLoading(false)
+        return
+      }
+
+      // Crear compra
+      const purchaseData = {
+        name: data.purchaseName,
+        supplier_id: supplier.id,
+        purchase_date: data.date,
+        total_amount: data.subtotal,
+        status: data.status,
+        items: validatedItems
+      }
+
+      await DatabaseService.createPurchase(purchaseData)
+
+      // Actualizar inventario automáticamente
+      for (const item of data.items) {
+        const article = articles?.find(a =>
+          a.name.toLowerCase().includes(item.name.toLowerCase()) ||
+          item.name.toLowerCase().includes(a.name.toLowerCase())
+        )
+
+        if (article) {
+          const currentStock = article.current_stock || 0
+          const currentPrice = article.cost_per_unit || 0
+          const newStock = currentStock + item.quantity
+
+          // Calcular precio promedio ponderado
+          const totalCurrentValue = currentStock * currentPrice
+          const totalNewValue = item.quantity * (item.price / item.quantity)
+          const averagePrice = newStock > 0 ? (totalCurrentValue + totalNewValue) / newStock : (item.price / item.quantity)
+
+          await DatabaseService.updateIngredient(article.id, {
+            current_stock: newStock,
+            cost_per_unit: averagePrice
+          })
+        }
+      }
+
+      toast.success("Compra creada exitosamente desde la factura")
+      await loadPurchases()
+    } catch (error: any) {
+      console.error('Error creating purchase from invoice:', error)
+      toast.error(error.message || "Error al crear la compra")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Cálculos de estadísticas
+  const totalPurchases = purchases.length
+  const totalSpent = purchases.reduce((sum, purchase) => sum + (purchase.total_amount || 0), 0)
+  const completedPurchases = purchases.filter((purchase) => purchase.status === "paid" || purchase.status === "completed").length
+  const paidPercentage = totalPurchases > 0 ? ((completedPurchases / totalPurchases) * 100).toFixed(1) : "0.0"
+  const pendingAmount = purchases
+    .filter((purchase) => purchase.status === "unpaid" || purchase.status === "pending")
+    .reduce((sum, purchase) => sum + (purchase.total_amount || 0), 0)
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    )
+  }
+
   return (
-    <div className="p-8 space-y-8 bg-gradient-to-br from-background via-background to-secondary/5 min-h-screen">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
-        <div className="space-y-2">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-secondary to-secondary/70 bg-clip-text text-transparent">
-            Gestión de Compras
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Administra tus compras y pedidos a proveedores
-          </p>
-        </div>
-        <Link href="/purchases/create">
-          <Button className="bg-gradient-to-r from-accent to-accent/90 hover:from-accent/90 hover:to-accent/80 text-accent-foreground shadow-lg hover:shadow-xl transition-all duration-300">
-            <Plus className="h-5 w-5 mr-2" />
-            Nueva Compra
-          </Button>
-        </Link>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="bg-gradient-to-br from-card to-card/80 border-primary/10 hover:border-primary/20 transition-all duration-300">
-          <CardHeader className="pb-3">
-            <CardDescription className="text-sm font-medium">Total Compras</CardDescription>
-            <CardTitle className="text-3xl font-bold text-foreground">{purchases.length}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="bg-gradient-to-br from-card to-card/80 border-secondary/10 hover:border-secondary/20 transition-all duration-300">
-          <CardHeader className="pb-3">
-            <CardDescription className="text-sm font-medium">Gasto Total</CardDescription>
-            <CardTitle className="text-3xl font-bold text-foreground">€{totalSpent.toFixed(2)}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="bg-gradient-to-br from-card to-card/80 border-green-500/10 hover:border-green-500/20 transition-all duration-300">
-          <CardHeader className="pb-3">
-            <CardDescription className="text-sm font-medium">Completadas</CardDescription>
-            <CardTitle className="text-3xl font-bold text-foreground">{completedPurchases}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="bg-gradient-to-br from-card to-card/80 border-yellow-500/10 hover:border-yellow-500/20 transition-all duration-300">
-          <CardHeader className="pb-3">
-            <CardDescription className="text-sm font-medium">Pendientes</CardDescription>
-            <CardTitle className="text-3xl font-bold text-foreground">{pendingPurchases}</CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
-
-      {/* Filters */}
-      <Card className="bg-gradient-to-br from-card to-card/90 border-border/50">
-        <CardHeader className="pb-4">
-          <CardTitle className="text-xl font-semibold">Filtros y Búsqueda</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por proveedor..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-12 h-12 bg-background/50 border-border/50 focus:border-primary/50 rounded-xl"
-                />
-              </div>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Banner de información */}
+        {showBanner && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+            <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 mt-0.5">
+              i
             </div>
-            <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-              <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="Proveedor" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los proveedores</SelectItem>
-                {suppliers.map((supplier) => (
-                  <SelectItem key={supplier} value={supplier}>
-                    {supplier}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="Estado" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los estados</SelectItem>
-                <SelectItem value="completed">Completadas</SelectItem>
-                <SelectItem value="pending">Pendientes</SelectItem>
-                <SelectItem value="cancelled">Canceladas</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex-1">
+              <p className="text-gray-700 text-sm leading-relaxed">
+                <strong>Módulo de Compras:</strong> Aquí podrás registrar todas tus compras que afectarán automáticamente el inventario de productos.
+                Puedes registrar las compras de forma manual o simplemente subir una foto de la factura y la aplicación se encargará de analizarla
+                y registrar la compra automáticamente por ti.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowBanner(false)}
+              className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer flex-shrink-0"
+            >
+              ✕
+            </button>
           </div>
-        </CardContent>
-      </Card>
+        )}
 
-      {/* Purchases List */}
-      <Card className="bg-gradient-to-br from-card to-card/90 border-border/50">
-        <CardHeader className="pb-4">
-          <CardTitle className="text-xl font-semibold">Lista de Compras</CardTitle>
-          <CardDescription className="text-base">
-            {filteredPurchases.length} compra(s) encontrada(s)
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+        {/* Tarjetas de estadísticas */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="text-sm text-gray-600 mb-1">Total Compras</div>
+            <div className="text-3xl font-bold text-gray-900">{totalPurchases}</div>
+          </div>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="text-sm text-gray-600 mb-1">Gasto Total</div>
+            <div className="text-3xl font-bold text-gray-900">€{totalSpent.toFixed(2)}</div>
+          </div>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="text-sm text-gray-600 mb-1">Pagadas</div>
+            <div className="text-3xl font-bold text-green-600">{paidPercentage}%</div>
+            <div className="text-xs text-gray-500 mt-1">{completedPurchases} de {totalPurchases}</div>
+          </div>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="text-sm text-gray-600 mb-1">Por pagar</div>
+            <div className="text-3xl font-bold text-orange-600">€{pendingAmount.toFixed(2)}</div>
+          </div>
+        </div>
+
+        {/* Barra de búsqueda y filtros */}
+        <div className="flex items-center gap-4 mb-6 flex-wrap">
+          <div className="flex-1 min-w-[300px] relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input
+              type="text"
+              placeholder="Buscar compra, proveedor o descripción..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value)
+                setCurrentPage(1)
+              }}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            />
+          </div>
+
+          <div className="relative" ref={filterMenuRef}>
+            <button
+              onClick={() => setOpenFilterMenu(!openFilterMenu)}
+              className={cn(
+                "px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap",
+                hasActiveFilters && "border-blue-500 bg-blue-50"
+              )}
+            >
+              <Filter size={18} />
+              Ordenar y Filtrar
+              {hasActiveFilters && (
+                <span className="ml-1 px-2 py-0.5 bg-blue-600 text-white text-xs rounded-full">
+                  {[statusFilter !== "all", dateFrom, dateTo, sortField !== null].filter(Boolean).length}
+                </span>
+              )}
+              <ChevronDown size={18} />
+            </button>
+
+            {openFilterMenu && (
+              <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-lg shadow-xl border border-gray-200 z-50">
+                <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-900">Ordenar y Filtrar</h3>
+                  <button
+                    onClick={() => setOpenFilterMenu(false)}
+                    className="text-gray-400 hover:text-gray-600 cursor-pointer"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="p-4 space-y-4 max-h-[500px] overflow-y-auto">
+                  {/* Ordenar */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Ordenar por</label>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => {
+                          if (sortField === 'date' && sortOrder === 'desc') {
+                            setSortOrder('asc')
+                          } else {
+                            setSortField('date')
+                            setSortOrder('desc')
+                          }
+                          setCurrentPage(1)
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg border transition-colors",
+                          sortField === 'date'
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        Fecha {sortField === 'date' && (sortOrder === 'asc' ? '(Ascendente)' : '(Descendente)')}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (sortField === 'amount' && sortOrder === 'desc') {
+                            setSortOrder('asc')
+                          } else {
+                            setSortField('amount')
+                            setSortOrder('desc')
+                          }
+                          setCurrentPage(1)
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg border transition-colors",
+                          sortField === 'amount'
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        Monto {sortField === 'amount' && (sortOrder === 'asc' ? '(Menor a Mayor)' : '(Mayor a Menor)')}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filtrar por Estado */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Estado</label>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => {
+                          setStatusFilter("all")
+                          setCurrentPage(1)
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg border transition-colors",
+                          statusFilter === "all"
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        Todos
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStatusFilter("paid")
+                          setCurrentPage(1)
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg border transition-colors",
+                          statusFilter === "paid"
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        Pagado
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStatusFilter("unpaid")
+                          setCurrentPage(1)
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg border transition-colors",
+                          statusFilter === "unpaid"
+                            ? "border-blue-500 bg-blue-50 text-blue-700"
+                            : "border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        Por Pagar
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filtrar por Rango de Fechas */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Rango de Fechas</label>
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Desde</label>
+                        <Input
+                          type="date"
+                          value={dateFrom}
+                          onChange={(e) => {
+                            setDateFrom(e.target.value)
+                            setCurrentPage(1)
+                          }}
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Hasta</label>
+                        <Input
+                          type="date"
+                          value={dateTo}
+                          onChange={(e) => {
+                            setDateTo(e.target.value)
+                            setCurrentPage(1)
+                          }}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 border-t border-gray-200 flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      clearFilters()
+                      setOpenFilterMenu(false)
+                    }}
+                    className="flex-1"
+                  >
+                    Limpiar
+                  </Button>
+                  <Button
+                    onClick={() => setOpenFilterMenu(false)}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700"
+                  >
+                    Aplicar
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => setShowUploadModal(true)}
+            className="px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+          >
+            <Upload size={18} />
+            Subir factura
+          </button>
+
+          <Link href="/purchases/create">
+            <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm cursor-pointer whitespace-nowrap">
+              <Plus className="inline-block mr-2" size={18} />
+              Nueva Compra
+            </button>
+          </Link>
+        </div>
+
+        {/* Tabla de compras */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+          {/* Encabezados de tabla */}
+          <div className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 bg-gray-50 font-medium text-sm text-gray-700">
+            <div className="col-span-3">Nombre</div>
+            <div className="col-span-2">Fecha</div>
+            <div className="col-span-3">Proveedor</div>
+            <div className="col-span-2">Total</div>
+            <div className="col-span-1">Estado</div>
+            <div className="col-span-1"></div>
+          </div>
+
+          {/* Filas de compras */}
           {filteredPurchases.length === 0 ? (
-            <div className="text-center py-12">
-              <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-muted-foreground">No hay compras</h3>
-              <p className="text-muted-foreground mb-4">Comienza registrando tu primera compra</p>
+            <div className="p-12 text-center">
+              <div className="text-6xl mb-4">🛒</div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No hay compras</h3>
+              <p className="text-gray-500 mb-4">
+                {searchTerm || hasActiveFilters
+                  ? "No se encontraron compras con los filtros aplicados"
+                  : "Comienza registrando tu primera compra"}
+              </p>
               <Link href="/purchases/create">
-                <Button>
-                  <Plus className="h-4 w-4 mr-2" />
+                <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors">
+                  <Plus className="inline-block mr-2" size={18} />
                   Nueva Compra
-                </Button>
+                </button>
               </Link>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Fecha</TableHead>
-                    <TableHead>Proveedor</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead>Notas</TableHead>
-                    <TableHead>Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredPurchases.map((purchase) => (
-                    <TableRow key={purchase.id}>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4 text-muted-foreground" />
-                          {new Date(purchase.purchase_date).toLocaleDateString('es-ES')}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Building className="h-4 w-4 text-muted-foreground" />
-                          {purchase.suppliers?.name || 'Sin proveedor'}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-semibold">
-                        €{(purchase.total_amount || 0).toFixed(2)}
-                      </TableCell>
-                      <TableCell>
-                        {getStatusBadge(purchase.status)}
-                      </TableCell>
-                      <TableCell className="max-w-xs truncate">
-                        {purchase.notes || 'Sin notas'}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Link href={`/purchases/${purchase.id}`}>
-                            <Button variant="ghost" size="sm">
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                          <Link href={`/purchases/${purchase.id}/edit`}>
-                            <Button variant="ghost" size="sm">
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => openDeleteModal(purchase)}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <>
+              {paginatedPurchases.map((purchase) => (
+              <div
+                key={purchase.id}
+                className="grid grid-cols-12 gap-4 p-4 border-b border-gray-200 hover:bg-gray-50 items-center transition-colors"
+              >
+                <div className="col-span-3">
+                  <span className="text-gray-900">
+                    {purchase.name}
+                  </span>
+                </div>
+
+                <div className="col-span-2 flex items-center gap-2 text-gray-700">
+                  <Calendar size={16} className="text-gray-400" />
+                  {new Date(purchase.purchase_date).toLocaleDateString('es-ES')}
+                </div>
+
+                <div className="col-span-3 flex items-center gap-2 text-gray-700">
+                  <Building size={16} className="text-gray-400" />
+                  {purchase.suppliers?.name || 'Sin proveedor'}
+                </div>
+
+                <div className="col-span-2 text-gray-900">
+                  €{(purchase.total_amount || 0).toFixed(2)}
+                </div>
+
+                <div className="col-span-1">
+                  {getStatusBadge(purchase.status)}
+                </div>
+
+                <div className="col-span-1 flex items-center justify-end">
+                  <div
+                    className="relative"
+                    ref={openMenuId === purchase.id ? menuRef : null}
+                  >
+                    <button
+                      onClick={() => toggleMenu(purchase.id)}
+                      className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition-colors"
+                    >
+                      <MoreVertical size={20} />
+                    </button>
+
+                    {openMenuId === purchase.id && (
+                      <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-10">
+                        <button
+                          onClick={() => handleView(purchase)}
+                          className="w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer flex items-center gap-2"
+                        >
+                          <Eye size={16} />
+                          Ver detalles
+                        </button>
+                        <button
+                          onClick={() => handleEdit(purchase)}
+                          className="w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer flex items-center gap-2"
+                        >
+                          <Edit size={16} />
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => {
+                            setOpenMenuId(null)
+                            openDeleteModal(purchase)
+                          }}
+                          className="w-full text-left px-4 py-3 hover:bg-red-50 text-red-600 text-sm transition-colors cursor-pointer flex items-center gap-2"
+                        >
+                          <Trash2 size={16} />
+                          Eliminar
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              ))}
+
+              {/* Paginación */}
+              {totalPages > 1 && (
+                <div className="border-t border-gray-200 px-4 py-4 flex items-center justify-between">
+                  <div className="text-sm text-gray-600">
+                    Mostrando {startIndex + 1} - {Math.min(endIndex, filteredPurchases.length)} de {filteredPurchases.length} compras
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage === 1}
+                      className={cn(
+                        "p-2 rounded-lg border transition-colors",
+                        currentPage === 1
+                          ? "border-gray-200 text-gray-400 cursor-not-allowed"
+                          : "border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
+                      )}
+                    >
+                      <ChevronLeft size={20} />
+                    </button>
+
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter(page => {
+                        // Show first page, last page, current page, and pages around current
+                        return (
+                          page === 1 ||
+                          page === totalPages ||
+                          Math.abs(page - currentPage) <= 1
+                        )
+                      })
+                      .map((page, index, array) => {
+                        // Add ellipsis if there's a gap
+                        const prevPage = array[index - 1]
+                        const showEllipsis = prevPage && page - prevPage > 1
+
+                        return (
+                          <React.Fragment key={page}>
+                            {showEllipsis && (
+                              <span className="px-2 text-gray-400">...</span>
+                            )}
+                            <button
+                              onClick={() => handlePageChange(page)}
+                              className={cn(
+                                "min-w-[40px] h-10 px-3 rounded-lg border transition-colors",
+                                currentPage === page
+                                  ? "border-blue-500 bg-blue-50 text-blue-700 font-medium"
+                                  : "border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
+                              )}
+                            >
+                              {page}
+                            </button>
+                          </React.Fragment>
+                        )
+                      })}
+
+                    <button
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage === totalPages}
+                      className={cn(
+                        "p-2 rounded-lg border transition-colors",
+                        currentPage === totalPages
+                          ? "border-gray-200 text-gray-400 cursor-not-allowed"
+                          : "border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
+                      )}
+                    >
+                      <ChevronRight size={20} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+
+        {/* Información de resultados sin paginación */}
+        {filteredPurchases.length > 0 && totalPages <= 1 && (
+          <div className="mt-4 text-sm text-gray-600 text-center">
+            Mostrando {filteredPurchases.length} compra(s)
+          </div>
+        )}
+      </div>
 
       <DeleteConfirmationModal
         isOpen={deleteModal.isOpen}
         onClose={closeDeleteModal}
         onConfirm={handleDelete}
         title="Eliminar Compra"
-        description="¿Estás seguro de que deseas eliminar la compra del"
-        itemName={`${new Date(deleteModal.item?.purchase_date || '').toLocaleDateString('es-ES')} - ${deleteModal.item?.suppliers?.name || 'Sin proveedor'}`}
+        description="¿Estás seguro de que deseas eliminar la compra"
+        itemName={deleteModal.item?.name || 'Sin nombre'}
         isLoading={deleteModal.isLoading}
+      />
+
+      <UploadInvoiceModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onSuccess={handleInvoiceSuccess}
       />
     </div>
   )
