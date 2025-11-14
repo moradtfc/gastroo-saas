@@ -141,71 +141,73 @@ function extractItems(lines: string[], currency: string): InvoiceItem[] {
   // Buscar líneas que contengan cantidad y precio
   const pricePattern = new RegExp(`[${currency}€$£]?\\s*([\\d]+[.,]?[\\d]*)\\s*${currency}?`, 'g')
 
+  // Rastrear líneas ya procesadas para evitar duplicados en productos multi-línea
+  const processedLines = new Set<number>()
+
   for (let i = 0; i < productLines.length; i++) {
+    // Saltar si ya procesamos esta línea como parte de un producto multi-línea
+    if (processedLines.has(i)) continue
+
     const line = productLines[i]
 
     // Buscar números que parezcan precios (con o sin símbolo de moneda)
     const numbers = extractNumbers(line)
 
-    // Una línea de producto típicamente tiene:
-    // - Nombre del producto (texto)
-    // - Cantidad (número pequeño, usualmente < 1000)
-    // - Precio unitario (número con decimales)
-    // - Total (número con decimales)
+    // REGLA CLAVE: Un producto termina cuando encontramos un PRECIO
+    // Detectar si esta línea tiene un precio al final (formato: X,XX € o similar)
+    const hasPriceAtEnd = /\d+[.,]\d{2}\s*[€$£]?\s*$/.test(line)
 
-    if (numbers.length >= 2) {
-      // Intentar identificar cantidad y precios
+    if (hasPriceAtEnd && numbers.length >= 1) {
+      // Esta línea tiene un precio, por lo tanto marca el FIN de un producto
       const possibleQuantity = numbers.find(n => n > 0 && n < 1000)
       const possiblePrices = numbers.filter(n => n >= 0)
 
-      if (possibleQuantity !== undefined && possiblePrices.length >= 1) {
-        // Extraer nombre del producto (texto antes de los números)
-        let name = extractProductName(line, numbers)
+      // Extraer nombre del producto de la línea actual
+      let name = extractProductName(line, numbers)
+      let quantity = possibleQuantity || 1
+      let unit = extractUnit(line)
 
-        // MANEJO DE PRODUCTOS MULTI-LÍNEA:
-        // Si el nombre es muy corto (< 5 caracteres), puede ser que el nombre
-        // esté en la línea anterior (ej: "ZANAHORTA BOLSA 1K" + "6 Un x 1,15 £/Un C 6,90 €")
-        if (name.length < 5 && i > 0) {
-          const previousLine = productLines[i - 1]
-          const previousNumbers = extractNumbers(previousLine)
+      // MANEJO DE PRODUCTOS MULTI-LÍNEA:
+      // Si el precio está aquí pero el nombre es muy corto/vacío,
+      // el nombre real está en la línea ANTERIOR
+      if (name.length < 5 && i > 0 && !processedLines.has(i - 1)) {
+        const previousLine = productLines[i - 1]
+        const previousNumbers = extractNumbers(previousLine)
+        const previousHasPrice = /\d+[.,]\d{2}\s*[€$£]?\s*$/.test(previousLine)
 
-          // Si la línea anterior tiene texto pero no tiene precios (o muy pocos números)
-          if (previousNumbers.length <= 1) {
-            const previousName = extractProductName(previousLine, previousNumbers)
-            if (previousName.length > 3) {
-              // Combinar el nombre de la línea anterior con el actual
-              name = previousName
-              console.log(`Producto multi-línea detectado: "${name}" con datos en línea siguiente`)
-            }
+        // Si la línea anterior NO tiene precio, es parte del nombre de este producto
+        if (!previousHasPrice) {
+          const previousName = extractProductName(previousLine, previousNumbers)
+          if (previousName.length > 3) {
+            name = previousName
+            processedLines.add(i - 1) // Marcar como procesada
+            console.log(`Producto multi-línea detectado: "${name}" con precio en línea ${i + 1}`)
           }
         }
+      }
 
-        if (name && name.length > 2) {
-          // Determinar precio y total
-          let price = 0
-          let total = 0
+      if (name && name.length > 2 && possiblePrices.length >= 1) {
+        // Determinar precio y total
+        let price = 0
+        let total = 0
 
-          if (possiblePrices.length >= 2) {
-            // Si hay 2 precios, uno es unitario y otro total
-            price = Math.min(...possiblePrices)
-            total = Math.max(...possiblePrices)
-          } else {
-            // Si solo hay 1 precio, asumimos que es el total
-            total = possiblePrices[0]
-            price = total / possibleQuantity
-          }
-
-          // Extraer unidad
-          const unit = extractUnit(line)
-
-          items.push({
-            name: name.trim(),
-            quantity: possibleQuantity,
-            unit,
-            price: Number(price.toFixed(2)),
-            total: Number(total.toFixed(2))
-          })
+        if (possiblePrices.length >= 2) {
+          // Si hay 2+ precios, el último suele ser el total
+          total = possiblePrices[possiblePrices.length - 1]
+          price = possiblePrices.length > 1 ? possiblePrices[possiblePrices.length - 2] : total / quantity
+        } else {
+          // Si solo hay 1 precio, es el total
+          total = possiblePrices[0]
+          price = total / quantity
         }
+
+        items.push({
+          name: name.trim(),
+          quantity: quantity,
+          unit,
+          price: Number(price.toFixed(2)),
+          total: Number(total.toFixed(2))
+        })
       }
     }
   }
