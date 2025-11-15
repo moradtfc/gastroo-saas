@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Search, X, Trash2, ChevronDown, Calendar, Undo2, Plus } from "lucide-react"
+import { Search, X, Trash2, ChevronDown, Calendar, Undo2, Plus, RefreshCw } from "lucide-react"
 import Link from "next/link"
 import { advancedSimilarity } from "@/lib/text-similarity"
 import { CreateSupplierModal } from "@/app/(dashboard)/suppliers/create-supplier-modal"
@@ -69,6 +69,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     total: number
   }>>([])
   const [assigningItemIndex, setAssigningItemIndex] = useState<number | null>(null)
+  const [changingItemId, setChangingItemId] = useState<string | null>(null)
   const [unmatchedSupplier, setUnmatchedSupplier] = useState<string | null>(null)
   const [isCreateSupplierModalOpen, setIsCreateSupplierModalOpen] = useState(false)
   const [isQuickCreateArticleModalOpen, setIsQuickCreateArticleModalOpen] = useState(false)
@@ -419,6 +420,36 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
   }
 
   const saveSelectedArticles = () => {
+    // Si estamos cambiando el artículo de un item existente
+    if (changingItemId !== null && selectedArticles.length === 1) {
+      const existingItem = items.find(i => i.id === changingItemId)
+      const newArticle = selectedArticles[0]
+
+      if (existingItem) {
+        const compatibleUnits = getCompatibleUnits(newArticle)
+        const defaultUnit = compatibleUnits[0]
+
+        const updatedItem: PurchaseItem = {
+          ...existingItem,
+          articleId: newArticle.id,
+          articleName: newArticle.name,
+          unit: defaultUnit?.name || 'unidad',
+          unitId: defaultUnit?.id || '',
+          unitSymbol: defaultUnit?.symbol || 'ud',
+          availableUnits: compatibleUnits
+          // Mantenemos quantity, price, total y originalInvoiceName del item existente
+        }
+
+        setItems(prev => prev.map(item => item.id === changingItemId ? updatedItem : item))
+        toast.success('Artículo cambiado correctamente')
+      }
+
+      setSelectedArticles([])
+      setIsArticleModalOpen(false)
+      setChangingItemId(null)
+      return
+    }
+
     // Si estamos asignando artículo a un item sin match
     if (assigningItemIndex !== null && selectedArticles.length === 1) {
       const unmatchedItem = unmatchedItems[assigningItemIndex]
@@ -482,8 +513,15 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
 
   const handleCancelAssign = () => {
     setAssigningItemIndex(null)
+    setChangingItemId(null)
     setSelectedArticles([])
     setIsArticleModalOpen(false)
+  }
+
+  const handleChangeArticle = (itemId: string) => {
+    setChangingItemId(itemId)
+    setSelectedArticles([])
+    setIsArticleModalOpen(true)
   }
 
   const handleUndoAssignment = (itemId: string) => {
@@ -549,14 +587,47 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
 
       await DatabaseService.createIngredient(articleData)
       toast.success("Artículo creado exitosamente")
-      setIsQuickCreateArticleModalOpen(false)
-      setQuickCreateArticleData({ name: "", categoryId: "", unitId: "", costPerUnit: "", currentStock: "" })
-      setCategorySearch("")
-      setUnitSearch("")
 
       // Recargar artículos
       const articlesData = await DatabaseService.getArticles()
       setArticles(articlesData || [])
+
+      // Si estamos creando desde un producto sin coincidencia, agregarlo a la compra
+      if (assigningItemIndex !== null) {
+        const unmatchedItem = unmatchedItems[assigningItemIndex]
+        // Buscar el artículo recién creado por nombre
+        const newArticle = articlesData?.find(a => a.name === quickCreateArticleData.name)
+
+        if (newArticle && unmatchedItem) {
+          const compatibleUnits = getCompatibleUnits(newArticle)
+          const defaultUnit = compatibleUnits[0]
+
+          const newItem: PurchaseItem = {
+            id: Date.now().toString() + Math.random(),
+            articleId: newArticle.id,
+            articleName: newArticle.name,
+            unit: defaultUnit?.name || 'unidad',
+            unitId: defaultUnit?.id || '',
+            unitSymbol: defaultUnit?.symbol || 'ud',
+            quantity: unmatchedItem.quantity,
+            price: unmatchedItem.price,
+            total: unmatchedItem.total,
+            availableUnits: compatibleUnits,
+            originalInvoiceName: unmatchedItem.name
+          }
+
+          setItems(prev => [...prev, newItem])
+          setUnmatchedItems(prev => prev.filter((_, i) => i !== assigningItemIndex))
+          toast.success('Artículo agregado a la compra')
+        }
+
+        setAssigningItemIndex(null)
+      }
+
+      setIsQuickCreateArticleModalOpen(false)
+      setQuickCreateArticleData({ name: "", categoryId: "", unitId: "", costPerUnit: "", currentStock: "" })
+      setCategorySearch("")
+      setUnitSearch("")
     } catch (error) {
       console.error("Error creando artículo:", error)
       toast.error("Error al crear artículo")
@@ -850,10 +921,16 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="text-xl">
-              {assigningItemIndex !== null ? 'Asignar Artículo' : 'Añadir Artículos'}
+              {changingItemId !== null
+                ? 'Cambiar Artículo'
+                : assigningItemIndex !== null
+                ? 'Asignar Artículo'
+                : 'Añadir Artículos'}
             </DialogTitle>
             <p className="text-sm text-gray-600 mt-1">
-              {assigningItemIndex !== null
+              {changingItemId !== null
+                ? 'Selecciona un artículo diferente (se mantendrán cantidad y precio)'
+                : assigningItemIndex !== null
                 ? `Selecciona un artículo para: ${unmatchedItems[assigningItemIndex]?.name}`
                 : 'Busca y añade artículos de tu inventario'}
             </p>
@@ -939,7 +1016,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
           </div>
 
           <DialogFooter className="border-t pt-4 mt-4 flex gap-2">
-            {assigningItemIndex !== null && (
+            {(assigningItemIndex !== null || changingItemId !== null) && (
               <Button
                 variant="outline"
                 onClick={handleCancelAssign}
@@ -951,13 +1028,17 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
             <Button
               onClick={saveSelectedArticles}
               disabled={
-                assigningItemIndex !== null
+                (assigningItemIndex !== null || changingItemId !== null)
                   ? selectedArticles.length !== 1
                   : selectedArticles.length === 0
               }
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
             >
-              {assigningItemIndex !== null
+              {changingItemId !== null
+                ? selectedArticles.length === 1
+                  ? 'Cambiar artículo'
+                  : 'Selecciona 1 artículo'
+                : assigningItemIndex !== null
                 ? selectedArticles.length === 1
                   ? 'Asignar artículo'
                   : 'Selecciona 1 artículo'
@@ -1371,8 +1452,15 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                       className="p-4 border border-gray-200 rounded-lg bg-white hover:border-gray-300 transition-colors"
                     >
                       <div className="flex items-center gap-3 mb-3">
-                        <div className="flex-1">
+                        <div className="flex-1 flex items-center gap-2">
                           <span className="font-semibold text-gray-900 block">{item.articleName}</span>
+                          <button
+                            onClick={() => handleChangeArticle(item.id)}
+                            className="text-blue-600 hover:text-blue-700 p-1.5 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            title="Cambiar producto"
+                          >
+                            <RefreshCw size={16} />
+                          </button>
                         </div>
                         {item.originalInvoiceName && (
                           <button
