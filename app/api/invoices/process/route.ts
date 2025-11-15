@@ -107,7 +107,8 @@ export async function POST(request: NextRequest) {
     console.log(`Tamaño de imagen: ${(bytes.byteLength / 1024).toFixed(2)} KB`)
 
     // Configurar el modelo Gemini 1.5 Flash (gratis)
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+    // Usar gemini-1.5-flash-latest para la versión más reciente disponible
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' })
 
     // Generar contenido con la imagen y el prompt
     const result = await model.generateContent([
