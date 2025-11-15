@@ -9,8 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Search, X, Trash2, ChevronDown, Calendar } from "lucide-react"
+import { Search, X, Trash2, ChevronDown, Calendar, Undo2, Plus } from "lucide-react"
 import Link from "next/link"
+import { advancedSimilarity } from "@/lib/text-similarity"
+import { CreateSupplierModal } from "@/app/(dashboard)/suppliers/create-supplier-modal"
 
 interface Article {
   id: string
@@ -66,6 +68,8 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     total: number
   }>>([])
   const [assigningItemIndex, setAssigningItemIndex] = useState<number | null>(null)
+  const [unmatchedSupplier, setUnmatchedSupplier] = useState<string | null>(null)
+  const [isCreateSupplierModalOpen, setIsCreateSupplierModalOpen] = useState(false)
 
   const [formData, setFormData] = useState({
     name: "",
@@ -132,7 +136,10 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
       }
 
       const results = await Promise.all(promises)
-      const [articlesData, suppliersData, unitsData, purchaseData] = results
+      const articlesData = results[0] as Article[]
+      const suppliersData = results[1] as Supplier[]
+      const unitsData = results[2] as Unit[]
+      const purchaseData = results[3] as any
 
       setArticles(articlesData || [])
       setSuppliers(suppliersData || [])
@@ -218,13 +225,23 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
             status: invoiceData.status
           })
 
-          // Buscar proveedor
-          const supplier = suppliers.find(s =>
-            s.name.toLowerCase().includes(invoiceData.supplier.toLowerCase()) ||
-            invoiceData.supplier.toLowerCase().includes(s.name.toLowerCase())
-          )
-          if (supplier) {
-            setSelectedSupplier(supplier)
+          // Buscar proveedor con matching avanzado
+          let bestSupplierMatch: { supplier: Supplier; score: number } | null = null
+
+          for (const supplier of suppliers) {
+            const score = advancedSimilarity(invoiceData.supplier, supplier.name)
+            if (score >= 0.7 && (!bestSupplierMatch || score > bestSupplierMatch.score)) {
+              bestSupplierMatch = { supplier, score }
+            }
+          }
+
+          if (bestSupplierMatch) {
+            setSelectedSupplier(bestSupplierMatch.supplier)
+            toast.success(`Proveedor "${bestSupplierMatch.supplier.name}" asignado automáticamente (${Math.round(bestSupplierMatch.score * 100)}% match)`)
+          } else {
+            // No hay match automático, guardar para asignación manual
+            setUnmatchedSupplier(invoiceData.supplier)
+            toast.info(`Proveedor "${invoiceData.supplier}" requiere asignación manual`)
           }
 
           // Procesar items
@@ -317,7 +334,30 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
 
   const handleSupplierSelect = (supplier: Supplier) => {
     setSelectedSupplier(supplier)
+    setUnmatchedSupplier(null) // Limpiar proveedor sin match si se selecciona uno
     setIsSupplierModalOpen(false)
+  }
+
+  const handleCreateSupplierSuccess = async () => {
+    // Recargar lista de proveedores
+    try {
+      const suppliersData = await DatabaseService.getSuppliers()
+      setSuppliers(suppliersData || [])
+
+      // Seleccionar el proveedor recién creado (el último de la lista)
+      if (suppliersData && suppliersData.length > 0) {
+        const newSupplier = suppliersData[suppliersData.length - 1]
+        setSelectedSupplier(newSupplier)
+        setUnmatchedSupplier(null)
+        toast.success(`Proveedor "${newSupplier.name}" creado y asignado`)
+      }
+    } catch (error) {
+      console.error('Error reloading suppliers:', error)
+    }
+  }
+
+  const handleRemoveSupplier = () => {
+    setSelectedSupplier(null)
   }
 
   const getCompatibleUnits = (article: Article): Unit[] => {
@@ -428,6 +468,24 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     setAssigningItemIndex(null)
     setSelectedArticles([])
     setIsArticleModalOpen(false)
+  }
+
+  const handleUndoAssignment = (itemId: string) => {
+    const item = items.find(i => i.id === itemId)
+    if (!item) return
+
+    // Mover el artículo de vuelta a unmatchedItems
+    const newUnmatchedItem = {
+      name: item.articleName,
+      quantity: typeof item.quantity === 'string' ? parseFloat(item.quantity) : item.quantity,
+      unit: item.unitSymbol,
+      price: typeof item.price === 'string' ? parseFloat(item.price) : item.price,
+      total: item.total
+    }
+
+    setUnmatchedItems(prev => [...prev, newUnmatchedItem])
+    setItems(items.filter(i => i.id !== itemId))
+    toast.success('Asignación deshecha. Puedes volver a asignar el artículo.')
   }
 
   const removeItem = (id: string) => {
@@ -987,14 +1045,24 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
             <section className="mb-10">
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-xl font-semibold">Proveedores</h2>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="bg-gray-100 hover:bg-gray-200 border border-gray-300"
-                  onClick={() => setIsSupplierModalOpen(true)}
-                >
-                  Añadir
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="bg-gray-100 hover:bg-gray-200 border border-gray-300"
+                    onClick={() => setIsSupplierModalOpen(true)}
+                  >
+                    Asignar
+                  </Button>
+                  <Button
+                    type="button"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={() => setIsCreateSupplierModalOpen(true)}
+                  >
+                    <Plus size={16} className="mr-2" />
+                    Crear proveedor
+                  </Button>
+                </div>
               </div>
 
               <p className="text-sm text-gray-600 mb-4">
@@ -1019,7 +1087,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => setSelectedSupplier(null)}
+                      onClick={handleRemoveSupplier}
                       className="text-gray-600 hover:text-gray-800"
                     >
                       Quitar
@@ -1036,6 +1104,50 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
             </section>
 
             <hr className="border-gray-200 mb-10" />
+
+            {/* Sección Proveedor sin match (si aplica) */}
+            {unmatchedSupplier && !selectedSupplier && (
+              <section className="mb-10">
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                  <h3 className="text-sm font-semibold text-yellow-800 mb-2">
+                    Proveedor sin coincidencia
+                  </h3>
+                  <p className="text-xs text-yellow-700 mb-3">
+                    El proveedor de la factura no tiene un match automático. Asigna un proveedor existente o crea uno nuevo.
+                  </p>
+
+                  <div className="p-4 border-2 border-orange-300 rounded-lg bg-orange-50">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h4 className="font-semibold text-gray-900 mb-1">{unmatchedSupplier}</h4>
+                        <p className="text-sm text-gray-600">Proveedor detectado en la factura</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="bg-white hover:bg-gray-50 border border-gray-300"
+                          onClick={() => setIsSupplierModalOpen(true)}
+                        >
+                          <Search size={16} className="mr-2" />
+                          Asignar proveedor
+                        </Button>
+                        <Button
+                          type="button"
+                          className="bg-blue-600 hover:bg-blue-700 text-white"
+                          onClick={() => setIsCreateSupplierModalOpen(true)}
+                        >
+                          <Plus size={16} className="mr-2" />
+                          Crear proveedor
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <hr className="border-gray-200 mb-10" />
+              </section>
+            )}
 
             {/* Sección Artículos */}
             <div className="mb-10">
@@ -1133,6 +1245,13 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                         <div className="flex-1">
                           <span className="font-semibold text-gray-900 block">{item.articleName}</span>
                         </div>
+                        <button
+                          onClick={() => handleUndoAssignment(item.id)}
+                          className="text-orange-600 hover:text-orange-700 p-2 hover:bg-orange-50 rounded-lg transition-colors cursor-pointer"
+                          title="Deshacer asignación"
+                        >
+                          <Undo2 size={18} />
+                        </button>
                         <button
                           onClick={() => removeItem(item.id)}
                           className="text-red-600 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
@@ -1307,6 +1426,13 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
           </div>
         </div>
       </div>
+
+      {/* Modal de creación de proveedor */}
+      <CreateSupplierModal
+        isOpen={isCreateSupplierModalOpen}
+        onClose={() => setIsCreateSupplierModalOpen(false)}
+        onSuccess={handleCreateSupplierSuccess}
+      />
     </>
   )
 }
