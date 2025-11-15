@@ -60,6 +60,13 @@ Responde SOLO con el JSON, sin explicaciones adicionales.
 
 export async function POST(request: NextRequest) {
   try {
+    // Debug: Verificar variables de entorno
+    console.log('=== DEBUG VARIABLES DE ENTORNO ===')
+    console.log('GEMINI_API_KEY existe:', !!process.env.GEMINI_API_KEY)
+    console.log('GEMINI_API_KEY length:', process.env.GEMINI_API_KEY?.length || 0)
+    console.log('GEMINI_API_KEY primeros 10 chars:', process.env.GEMINI_API_KEY?.substring(0, 10) || 'undefined')
+    console.log('===================================')
+
     const formData = await request.formData()
     const file = formData.get('file') as File
 
@@ -82,6 +89,7 @@ export async function POST(request: NextRequest) {
     // Validar que la API key esté configurada
     if (!process.env.GEMINI_API_KEY) {
       console.error('GEMINI_API_KEY no está configurada')
+      console.error('Todas las variables de entorno:', Object.keys(process.env).filter(k => k.includes('GEMINI')))
       return NextResponse.json(
         { message: 'Error de configuración del servidor. Contacte al administrador.' },
         { status: 500 }
