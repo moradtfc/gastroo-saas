@@ -563,6 +563,26 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     }
   }
 
+  const handleRemoveUnmatchedItem = (index: number) => {
+    setUnmatchedItems(prev => prev.filter((_, i) => i !== index))
+    toast.success("Producto sin coincidencia eliminado")
+  }
+
+  const handleCreateArticleFromUnmatched = (unmatchedItem: any, index: number) => {
+    // Prellenar el formulario de creación rápida con los datos del producto sin coincidencia
+    setQuickCreateArticleData({
+      name: unmatchedItem.name,
+      categoryId: "",
+      unitId: "",
+      costPerUnit: unmatchedItem.price.toString(),
+      currentStock: unmatchedItem.quantity.toString()
+    })
+    setIsQuickCreateArticleModalOpen(true)
+
+    // Guardar el índice del item para eliminarlo después de crear el artículo si el usuario quiere
+    setAssigningItemIndex(index)
+  }
+
   const removeItem = (id: string) => {
     setItems(items.filter(item => item.id !== id))
   }
@@ -805,6 +825,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
       const prc = typeof item.price === 'string' ? parseFloat(item.price) : item.price
       return qty > 0 && prc > 0
     }) &&
+    unmatchedItems.length === 0 && // No permitir guardar si hay productos sin coincidencia
     hasChanges()
   )
 
@@ -1130,21 +1151,21 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-xl font-semibold">Proveedores</h2>
                 <div className="flex gap-2">
-                  <Button
+                  <button
                     type="button"
-                    className="bg-gray-200 hover:bg-gray-300"
+                    className="px-5 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-semibold transition-colors cursor-pointer"
                     onClick={() => setIsSupplierModalOpen(true)}
                   >
                     Asignar
-                  </Button>
-                  <Button
+                  </button>
+                  <button
                     type="button"
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors cursor-pointer flex items-center gap-2"
                     onClick={() => setIsCreateSupplierModalOpen(true)}
                   >
-                    <Plus size={16} className="mr-2" />
+                    <Plus size={16} />
                     Crear proveedor
-                  </Button>
+                  </button>
                 </div>
               </div>
 
@@ -1276,16 +1297,32 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex-1">
                           <h4 className="font-semibold text-gray-900 mb-1">{item.name}</h4>
-                          <p className="text-sm text-gray-600">
+                          <p className="text-sm text-gray-600 mb-3">
                             {item.quantity} {item.unit} • €{item.price.toFixed(2)} c/u • Total: €{item.total.toFixed(2)}
                           </p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleCreateArticleFromUnmatched(item, index)}
+                              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-1.5"
+                            >
+                              <Plus size={14} />
+                              Crear artículo
+                            </button>
+                            <button
+                              onClick={() => handleAssignArticle(index)}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-1.5"
+                            >
+                              <Search size={14} />
+                              Asignar artículo
+                            </button>
+                          </div>
                         </div>
                         <button
-                          onClick={() => handleAssignArticle(index)}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-2"
+                          onClick={() => handleRemoveUnmatchedItem(index)}
+                          className="text-red-600 hover:text-red-700 p-2 hover:bg-red-100 rounded-lg transition-colors"
+                          title="Eliminar producto sin coincidencia"
                         >
-                          <Search size={16} />
-                          Asignar artículo
+                          <Trash2 size={18} />
                         </button>
                       </div>
                     </div>
