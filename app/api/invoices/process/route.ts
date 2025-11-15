@@ -101,14 +101,35 @@ function extractDate(text: string): string {
         // Formato: DD de mes de YYYY
         const day = match[1].padStart(2, '0')
         const month = monthMap[match[2].toLowerCase()] || '01'
-        const year = match[3]
+        let year = match[3]
+
+        // Corregir errores comunes del OCR en el año
+        if (year.startsWith('20') && parseInt(year) > 2050) {
+          // Si es 2075, probablemente es 2025 (error OCR de 7 por 2)
+          year = '20' + year.slice(2).replace(/7/g, '2')
+        }
+
         return `${year}-${month}-${day}`
       } else if (match[1].length === 4) {
         // Formato: YYYY/MM/DD
-        return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`
+        let year = match[1]
+
+        // Corregir errores comunes del OCR en el año
+        if (year.startsWith('20') && parseInt(year) > 2050) {
+          year = '20' + year.slice(2).replace(/7/g, '2')
+        }
+
+        return `${year}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`
       } else {
         // Formato: DD/MM/YYYY
-        return `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`
+        let year = match[3]
+
+        // Corregir errores comunes del OCR en el año (ej: 2075 → 2025)
+        if (year.startsWith('20') && parseInt(year) > 2050) {
+          year = '20' + year.slice(2).replace(/7/g, '2')
+        }
+
+        return `${year}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`
       }
     }
   }
@@ -131,21 +152,41 @@ function extractTotal(text: string): number {
 
   // Buscar líneas que contengan "TOTAL ENTREGADO", "TOTAL A PAGAR", "IMPORTE TOTAL", etc.
   const totalKeywords = [
-    /TOTAL\s+ENTREGADO[^\d]*(\d+[.,]\d{2})/i,
-    /TOTAL\s+A\s+PAGAR[^\d]*(\d+[.,]\d{2})/i,
-    /IMPORTE\s+TOTAL[^\d]*(\d+[.,]\d{2})/i,
-    /TOTAL[^\d]*(\d+[.,]\d{2})\s*[€$£]\s*$/i
+    /TOTAL\s+ENTREGADO.*?(\d+[.,]\d{2})/i,
+    /TOTAL\s+A\s+PAGAR.*?(\d+[.,]\d{2})/i,
+    /IMPORTE\s+TOTAL.*?(\d+[.,]\d{2})/i,
+    /(?:^|\s)TOTAL\s*[:\.]?\s*(\d+[.,]\d{2})\s*€?\s*$/i,
+    /TOTAL.*?(\d+[.,]\d{2})\s*€\s*$/i
   ]
 
   for (const line of lines) {
+    // Ignorar líneas con "SUBTOTAL"
+    if (/SUBTOTAL/i.test(line)) continue
+
     for (const pattern of totalKeywords) {
       const match = line.match(pattern)
       if (match) {
         const totalStr = match[1].replace(',', '.')
         const total = parseFloat(totalStr)
-        if (!isNaN(total)) {
+        if (!isNaN(total) && total > 0) {
           console.log(`Total extraído: ${total} € de línea: "${line.trim()}"`)
           return total
+        }
+      }
+    }
+  }
+
+  // Buscar cualquier línea con "TOTAL" seguida de un número grande (> 10€)
+  for (const line of lines) {
+    if (/\bTOTAL\b/i.test(line) && !/SUBTOTAL/i.test(line)) {
+      const numbers = line.match(/(\d+[.,]\d{2})/g)
+      if (numbers) {
+        // Tomar el número más grande de la línea
+        const totals = numbers.map(n => parseFloat(n.replace(',', '.')))
+        const maxTotal = Math.max(...totals)
+        if (maxTotal > 10) {
+          console.log(`Total extraído (fallback): ${maxTotal} € de línea: "${line.trim()}"`)
+          return maxTotal
         }
       }
     }
@@ -155,123 +196,189 @@ function extractTotal(text: string): number {
   return 0
 }
 
-// Extrae los items de la factura
+// Extrae los items de la factura con detección mejorada de patrones
 function extractItems(lines: string[], currency: string): InvoiceItem[] {
   const items: InvoiceItem[] = []
 
-  // REGLA CLAVE: Solo procesar líneas ANTES de "TOTAL"
-  // Encontrar el índice de la primera línea que contiene "TOTAL" en mayúscula
-  const totalIndex = lines.findIndex(line => {
+  // Buscar el índice donde termina la lista de productos
+  // Buscamos "TOTAL" pero ignoramos "TOTAL:" o líneas que son claramente subtotales
+  const totalIndex = lines.findIndex((line, idx) => {
     const upperLine = line.toUpperCase()
-    return /\bTOTAL\b/.test(upperLine)
+    // Debe contener "TOTAL" y un número, pero no ser "SUBTOTAL" ni tener ":"
+    return /\bTOTAL\b/.test(upperLine) &&
+           !/\bSUBTOTAL\b/.test(upperLine) &&
+           /\d+[.,]\d{2}/.test(line) &&
+           !/TOTAL\s*:/.test(upperLine)
   })
 
-  // Si encontramos "TOTAL", solo procesar líneas antes de ese índice
-  // Si no encontramos "TOTAL", procesar todas las líneas
   const productLines = totalIndex !== -1 ? lines.slice(0, totalIndex) : lines
+  console.log(`Procesando ${productLines.length} líneas de productos (antes de TOTAL en línea ${totalIndex + 1})`)
 
-  console.log(`Procesando ${productLines.length} líneas de productos (antes de TOTAL en línea ${totalIndex})`)
-
-  // Patrones para identificar líneas de producto
-  // Buscar líneas que contengan cantidad y precio
-  const pricePattern = new RegExp(`[${currency}€$£]?\\s*([\\d]+[.,]?[\\d]*)\\s*${currency}?`, 'g')
-
-  // Rastrear líneas ya procesadas para evitar duplicados en productos multi-línea
   const processedLines = new Set<number>()
 
   for (let i = 0; i < productLines.length; i++) {
-    // Saltar si ya procesamos esta línea como parte de un producto multi-línea
     if (processedLines.has(i)) continue
 
     const line = productLines[i]
+    const cleanLine = line.trim()
 
-    // Buscar números que parezcan precios (con o sin símbolo de moneda)
+    // Saltar líneas vacías o muy cortas
+    if (cleanLine.length < 3) continue
+
+    // Saltar líneas que son claramente headers o separadores
+    if (/^[\-=_\s]+$/.test(cleanLine) || /^(DESCRIPCION|PRODUCTO|CANTIDAD|PRECIO|TOTAL)/i.test(cleanLine)) {
+      continue
+    }
+
+    // Extraer todos los números de la línea
     const numbers = extractNumbers(line)
 
-    // REGLA CLAVE: Un producto termina cuando encontramos un PRECIO
-    // Detectar si esta línea tiene un precio al final (formato: X,XX € o similar)
-    const hasPriceAtEnd = /\d+[.,]\d{2}\s*[€$£]?\s*$/.test(line)
+    // PATRÓN 1: Productos con peso/cantidad y precio unitario
+    // Ejemplo: "0,615 kg x 2,69 €/kg G 1,66€"
+    const weightPriceMatch = line.match(/(\d+[.,]\d+)\s*(kg|g|l|ml|un)\s*x\s*(\d+[.,]\d+)\s*€?\s*[\/]?\s*(?:kg|g|l|ml|un)?.*?(\d+[.,]\d{2})\s*€?\s*$/i)
 
-    if (hasPriceAtEnd && numbers.length >= 1) {
-      // Esta línea tiene un precio, por lo tanto marca el FIN de un producto
+    if (weightPriceMatch) {
+      const quantity = parseFloat(weightPriceMatch[1].replace(',', '.'))
+      const unit = weightPriceMatch[2].toLowerCase()
+      const unitPrice = parseFloat(weightPriceMatch[3].replace(',', '.'))
+      const total = parseFloat(weightPriceMatch[4].replace(',', '.'))
 
-      // Extraer nombre del producto de la línea actual
-      let name = extractProductName(line, numbers)
-      let quantity = 1
-      let unit = extractUnit(line)
+      // Nombre del producto: todo lo que está antes del patrón de peso
+      let name = line.substring(0, line.indexOf(weightPriceMatch[1]))
 
-      // Determinar precio y total
-      let price = 0
-      let total = 0
+      // Si el nombre está en la línea anterior (producto multi-línea)
+      if (name.trim().length < 3 && i > 0 && !processedLines.has(i - 1)) {
+        name = productLines[i - 1]
+        processedLines.add(i - 1)
+      }
 
-      // MANEJO DE PRODUCTOS MULTI-LÍNEA:
-      // Si el precio está aquí pero el nombre es muy corto/vacío,
-      // el nombre real está en la línea ANTERIOR
+      name = cleanProductName(name)
+
+      if (name.length > 2) {
+        items.push({
+          name,
+          quantity,
+          unit,
+          price: unitPrice,
+          total
+        })
+        processedLines.add(i)
+        continue
+      }
+    }
+
+    // PATRÓN 2: Productos con cantidad explícita (unidades)
+    // Ejemplo: "4 Un x 1,75 €/n A 7,00€"
+    const quantityPriceMatch = line.match(/(\d+)\s*Un\s*x\s*(\d+[.,]\d+).*?(\d+[.,]\d{2})\s*€?\s*$/i)
+
+    if (quantityPriceMatch) {
+      const quantity = parseInt(quantityPriceMatch[1])
+      const unitPrice = parseFloat(quantityPriceMatch[2].replace(',', '.'))
+      const total = parseFloat(quantityPriceMatch[3].replace(',', '.'))
+
+      let name = line.substring(0, line.indexOf(quantityPriceMatch[0]))
+
+      if (name.trim().length < 3 && i > 0 && !processedLines.has(i - 1)) {
+        name = productLines[i - 1]
+        processedLines.add(i - 1)
+      }
+
+      name = cleanProductName(name)
+
+      if (name.length > 2) {
+        items.push({
+          name,
+          quantity,
+          unit: 'unidad',
+          price: unitPrice,
+          total
+        })
+        processedLines.add(i)
+        continue
+      }
+    }
+
+    // PATRÓN 3: Productos simples con precio al final
+    // Ejemplo: "ATÚN CLARO ALIPENDE P6 NATI A 4,20€" o "PA,ATA BLANCA BOLSA 1K GUAR C—1,09€"
+    const simplePriceMatch = line.match(/(\d+[.,]\d{2})\s*€?\s*$/i)
+
+    if (simplePriceMatch && numbers.length >= 1) {
+      const total = numbers[numbers.length - 1]
+
+      // Evitar líneas que son claramente totales, descuentos, o impuestos
+      const upperLine = line.toUpperCase()
+      if (/TOTAL|SUBTOTAL|IVA|IMPUESTO|DESCUENTO|PROMOCION|CAMBIO|ENTREGADO/.test(upperLine)) {
+        continue
+      }
+
+      let name = cleanProductName(line.substring(0, line.indexOf(simplePriceMatch[0])))
+
+      // Si el nombre es muy corto, buscar en la línea anterior
       if (name.length < 5 && i > 0 && !processedLines.has(i - 1)) {
-        const previousLine = productLines[i - 1]
-        const previousNumbers = extractNumbers(previousLine)
-        const previousHasPrice = /\d+[.,]\d{2}\s*[€$£]?\s*$/.test(previousLine)
+        const prevLine = productLines[i - 1]
+        const prevHasPrice = /\d+[.,]\d{2}\s*€?\s*$/.test(prevLine)
 
-        // Si la línea anterior NO tiene precio, es parte del nombre de este producto
-        if (!previousHasPrice) {
-          const previousName = extractProductName(previousLine, previousNumbers)
-          if (previousName.length > 3) {
-            name = previousName
-            processedLines.add(i - 1) // Marcar como procesada
-            console.log(`Producto multi-línea detectado: "${name}" con precio en línea ${i + 1}`)
+        if (!prevHasPrice) {
+          const prevName = cleanProductName(prevLine)
+          if (prevName.length > 3) {
+            name = prevName
+            processedLines.add(i - 1)
           }
         }
       }
 
-      // Determinar cantidad, precio unitario y precio total
-      // Patrón común: "6 Un x 1,15 £/Un C 6,90 €" → cantidad=6, precio=1.15, total=6.90
-      const quantityMatch = line.match(/(\d+)\s*Un\s*x\s*(\d+[.,]\d{2})/i)
-
-      if (quantityMatch) {
-        // Línea con formato explícito de cantidad
-        quantity = parseInt(quantityMatch[1])
-        price = parseFloat(quantityMatch[2].replace(',', '.'))
-        total = numbers[numbers.length - 1] // El último número es el total
-      } else if (numbers.length >= 2) {
-        // Si hay múltiples números, el último es el total
-        total = numbers[numbers.length - 1]
-
-        // Buscar un número que pueda ser cantidad (pequeño, entero o casi entero, < 100)
-        const possibleQty = numbers.find(n => n > 0 && n < 100 && (n === Math.floor(n) || n < 20))
-
-        if (possibleQty && possibleQty !== total) {
-          quantity = possibleQty
-          price = total / quantity
-        } else {
-          // No hay cantidad explícita, cantidad = 1
-          quantity = 1
-          price = total
-        }
-      } else {
-        // Solo hay 1 número: es el precio total, cantidad = 1
-        total = numbers[0]
-        price = total
-        quantity = 1
-      }
-
-      if (name && name.length > 2) {
+      if (name.length > 2) {
         items.push({
-          name: name.trim(),
-          quantity: quantity,
-          unit,
-          price: Number(price.toFixed(2)),
-          total: Number(total.toFixed(2))
+          name,
+          quantity: 1,
+          unit: extractUnit(line),
+          price: total,
+          total
         })
+        processedLines.add(i)
+        continue
       }
     }
   }
 
-  // Si no se encontraron items, intentar un parsing más agresivo
+  console.log(`Extraídos ${items.length} productos`)
+
+  // Si no se encontraron items, intentar parsing de fallback
   if (items.length === 0) {
     return fallbackItemExtraction(productLines, currency)
   }
 
   return items
+}
+
+// Función mejorada para limpiar el nombre del producto
+function cleanProductName(rawName: string): string {
+  let name = rawName
+
+  // Remover símbolos de moneda
+  name = name.replace(/[€$£]/g, ' ')
+
+  // Remover números con decimales (precios)
+  name = name.replace(/\d+[.,]\d+/g, ' ')
+
+  // Remover patrones de cantidad y peso
+  name = name.replace(/\d+\s*(kg|g|l|ml|un|unidad|unidades)/gi, ' ')
+  name = name.replace(/x\s*\d+/gi, ' ')
+
+  // Remover códigos y letras sueltas al final (A, B, C, E, etc.)
+  name = name.replace(/\s+[A-Z](\s+|$)/g, ' ')
+
+  // Remover guiones, barras y caracteres especiales al final o intermedios
+  name = name.replace(/[\-—_|]+/g, ' ')
+  name = name.replace(/\s*[C]\s*$/g, '') // Letra C suelta al final
+
+  // Remover puntos finales extraños
+  name = name.replace(/\.+\s*$/g, '')
+
+  // Remover espacios múltiples
+  name = name.replace(/\s+/g, ' ').trim()
+
+  return name
 }
 
 // Extrae todos los números de una línea
@@ -294,44 +401,6 @@ function extractNumbers(line: string): number[] {
   }
 
   return numbers
-}
-
-// Extrae el nombre del producto de una línea
-function extractProductName(line: string, numbers: number[]): string {
-  let name = line
-
-  // Remover símbolos de moneda
-  name = name.replace(/[€$£]/g, ' ')
-
-  // Remover todos los números con decimales (ej: 1,89 o 1.89)
-  name = name.replace(/\d+[.,]\d+/g, ' ')
-
-  // Remover números enteros que sean parte de precios/cantidades
-  numbers.forEach(num => {
-    // Crear patrón que capture el número con sus posibles decimales
-    const numInt = Math.floor(num)
-    name = name.replace(new RegExp(`\\b${numInt}\\b`, 'g'), ' ')
-  })
-
-  // Remover patrones de cantidad (ej: "6 Un x" o "Un x")
-  name = name.replace(/\d+\s*Un\s*x\s*\d+[.,]\d+/gi, ' ')
-  name = name.replace(/Un\s*x/gi, ' ')
-
-  // Remover unidades comunes
-  const units = ['kg', 'g', 'l', 'ml', 'ud', 'unidad', 'unidades', 'pcs', 'pz']
-  units.forEach(unit => {
-    name = name.replace(new RegExp(`\\b${unit}\\b`, 'gi'), ' ')
-  })
-
-  // Remover patrones comunes no deseados
-  name = name.replace(/[C\-—]+\s*$/g, '') // Remover guiones y letras sueltas al final
-  name = name.replace(/\s+[C\-—]+\s*/g, ' ') // Remover guiones y letras sueltas intermedias
-  name = name.replace(/\s*\/\s*/g, ' ') // Remover barras
-
-  // Limpiar espacios múltiples y espacios al inicio/final
-  name = name.replace(/\s+/g, ' ').trim()
-
-  return name
 }
 
 // Extrae la unidad de medida
@@ -372,10 +441,14 @@ function fallbackItemExtraction(lines: string[], currency: string): InvoiceItem[
       const numbers = extractNumbers(line)
 
       if (numbers.length > 0) {
-        const name = extractProductName(line, numbers)
+        // Extraer el precio (último número) y limpiar el nombre
+        const priceMatch = line.match(/(\d+[.,]\d{2})\s*€?\s*$/i)
+        if (!priceMatch) continue
+
+        const name = cleanProductName(line.substring(0, line.indexOf(priceMatch[0])))
 
         // Filtrar nombres que sean demasiado cortos o contengan palabras clave no deseadas
-        const invalidKeywords = ['subtotal', 'impuesto', 'iva', 'tax', 'descuento', 'entregado', 'cambio']
+        const invalidKeywords = ['subtotal', 'impuesto', 'iva', 'tax', 'descuento', 'entregado', 'cambio', 'total', 'promocion']
         const hasInvalidKeyword = invalidKeywords.some(keyword =>
           name.toLowerCase().includes(keyword)
         )
@@ -387,7 +460,7 @@ function fallbackItemExtraction(lines: string[], currency: string): InvoiceItem[
           items.push({
             name: name.trim(),
             quantity: 1,
-            unit: 'unidad',
+            unit: extractUnit(line),
             price: price,
             total: price
           })
@@ -395,6 +468,8 @@ function fallbackItemExtraction(lines: string[], currency: string): InvoiceItem[
       }
     }
   }
+
+  console.log(`Fallback extrajo ${items.length} productos`)
 
   return items
 }
@@ -426,16 +501,19 @@ export async function POST(request: NextRequest) {
 
     console.log('Procesando factura con OCR...')
 
-    // Procesar imagen con Tesseract.js
+    // Procesar imagen con Tesseract.js con configuración optimizada para facturas
     const { data } = await Tesseract.recognize(
       buffer,
-      'spa', // Idioma español
+      'spa+eng', // Idioma español e inglés para mejor detección de marcas/códigos
       {
         logger: m => {
           if (m.status === 'recognizing text') {
             console.log(`OCR Progress: ${(m.progress * 100).toFixed(0)}%`)
           }
-        }
+        },
+        // Configuración optimizada para documentos estructurados como facturas
+        tessedit_pageseg_mode: Tesseract.PSM.AUTO, // Detección automática del layout
+        preserve_interword_spaces: '1', // Preservar espacios entre palabras
       }
     )
 
