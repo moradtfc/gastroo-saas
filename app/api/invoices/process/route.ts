@@ -19,7 +19,9 @@ interface InvoiceData {
 }
 
 // Inicializar Gemini API
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '')
+// TEMPORAL: Hardcoded API key (mover a .env después de resolver el problema)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyA4vWfXWpO5-u2tlXlYe2hfR_QhzP0Lmco'
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
 
 // Prompt optimizado para extracción de datos de facturas
 const INVOICE_EXTRACTION_PROMPT = `
@@ -87,7 +89,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validar que la API key esté configurada
-    if (!process.env.GEMINI_API_KEY) {
+    if (!GEMINI_API_KEY || GEMINI_API_KEY === '') {
       console.error('GEMINI_API_KEY no está configurada')
       console.error('Todas las variables de entorno:', Object.keys(process.env).filter(k => k.includes('GEMINI')))
       return NextResponse.json(
