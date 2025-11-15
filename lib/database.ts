@@ -734,7 +734,115 @@ export class DatabaseService {
       .insert(expense)
       .select()
       .single()
-    
+
+    if (error) throw error
+    return data
+  }
+
+  // Product Mappings (for OCR matching)
+  static async getProductMappings() {
+    const { data, error } = await supabase
+      .from('product_mappings')
+      .select(`
+        *,
+        ingredients (
+          id,
+          name,
+          unit,
+          category
+        )
+      `)
+      .order('times_used', { ascending: false })
+
+    if (error) throw error
+    return data
+  }
+
+  static async getProductMappingByOcrText(ocrText: string) {
+    const normalizedText = ocrText.toLowerCase().trim()
+
+    const { data, error } = await supabase
+      .from('product_mappings')
+      .select(`
+        *,
+        ingredients (
+          id,
+          name,
+          unit,
+          category
+        )
+      `)
+      .ilike('ocr_text', normalizedText)
+      .order('times_used', { ascending: false })
+      .limit(5)
+
+    if (error) throw error
+    return data
+  }
+
+  static async createOrUpdateProductMapping(
+    ocrText: string,
+    ingredientId: string,
+    confidenceScore: number = 1.0
+  ) {
+    const { data, error } = await supabase.rpc('upsert_product_mapping', {
+      p_ocr_text: ocrText.toLowerCase().trim(),
+      p_ingredient_id: ingredientId,
+      p_confidence_score: confidenceScore
+    })
+
+    if (error) throw error
+    return data
+  }
+
+  static async incrementMappingUsage(mappingId: string) {
+    const { data, error } = await supabase.rpc('increment_mapping_usage', {
+      mapping_id: mappingId
+    })
+
+    if (error) throw error
+    return data
+  }
+
+  // Invoice OCR Results
+  static async createInvoiceOcrResult(ocrData: {
+    purchase_id?: string
+    raw_text: string
+    parsed_items: any[]
+    processed?: boolean
+  }) {
+    const { data, error } = await supabase
+      .from('invoice_ocr_results')
+      .insert(ocrData)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  }
+
+  static async getInvoiceOcrResults() {
+    const { data, error } = await supabase
+      .from('invoice_ocr_results')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+    return data
+  }
+
+  static async updateInvoiceOcrResult(id: string, updates: {
+    purchase_id?: string
+    processed?: boolean
+    parsed_items?: any[]
+  }) {
+    const { data, error } = await supabase
+      .from('invoice_ocr_results')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+
     if (error) throw error
     return data
   }

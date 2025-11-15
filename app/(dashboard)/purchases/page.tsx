@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Search, Eye, Edit, Trash2, Calendar, Building, Package, AlertTriangle } from "lucide-react"
+import { Plus, Search, Eye, Edit, Trash2, Calendar, Building, Package, AlertTriangle, Sparkles } from "lucide-react"
 import { DatabaseService } from "@/lib/database"
 import { toast } from "sonner"
 import { DeleteConfirmationModal } from "@/components/ui/delete-confirmation-modal"
@@ -131,12 +131,20 @@ export default function PurchasesPage() {
             Administra tus compras y pedidos a proveedores
           </p>
         </div>
-        <Link href="/purchases/create">
-          <Button className="bg-gradient-to-r from-accent to-accent/90 hover:from-accent/90 hover:to-accent/80 text-accent-foreground shadow-lg hover:shadow-xl transition-all duration-300">
-            <Plus className="h-5 w-5 mr-2" />
-            Nueva Compra
-          </Button>
-        </Link>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Link href="/purchases/process-invoice">
+            <Button className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-300">
+              <Sparkles className="h-5 w-5 mr-2" />
+              Procesar Factura (OCR)
+            </Button>
+          </Link>
+          <Link href="/purchases/create">
+            <Button className="bg-gradient-to-r from-accent to-accent/90 hover:from-accent/90 hover:to-accent/80 text-accent-foreground shadow-lg hover:shadow-xl transition-all duration-300">
+              <Plus className="h-5 w-5 mr-2" />
+              Nueva Compra Manual
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Stats Cards */}
