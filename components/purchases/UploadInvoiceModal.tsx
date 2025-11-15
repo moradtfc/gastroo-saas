@@ -8,7 +8,7 @@ import { Upload, X, FileText, Loader2, Check, Edit2, CheckCircle, AlertTriangle,
 import { toast } from "sonner"
 import Image from "next/image"
 import { DatabaseService } from "@/lib/database"
-import { advancedSimilarity } from "@/lib/text-similarity"
+import { productMatchingScore, toTitleCase } from "@/lib/text-similarity"
 
 interface InvoiceItem {
   name: string
@@ -85,10 +85,10 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoice
 
   const performMatching = (items: InvoiceItem[]): ItemMatch[] => {
     return items.map(item => {
-      // Calcular scores para todos los artículos
+      // Calcular scores para todos los artículos usando el algoritmo mejorado
       const scoredArticles = articles.map(article => ({
         article,
-        score: advancedSimilarity(item.name, article.name)
+        score: productMatchingScore(item.name, article.name)
       }))
 
       // Ordenar por score descendente
@@ -97,9 +97,9 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoice
       // Tomar los top 5
       const suggestedArticles = scoredArticles.slice(0, 5)
 
-      // Auto-seleccionar si el score es alto
+      // Auto-seleccionar si el score es alto (>= 0.7 para ser más selectivo)
       const bestMatch = suggestedArticles[0]
-      const selectedArticleId = bestMatch && bestMatch.score >= 0.5 ? bestMatch.article.id : null
+      const selectedArticleId = bestMatch && bestMatch.score >= 0.7 ? bestMatch.article.id : null
 
       return {
         selectedArticleId,
@@ -149,10 +149,21 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoice
       }
 
       const data = await response.json()
-      setInvoiceData(data)
+
+      // Aplicar formato de título a productos y proveedor
+      const formattedData = {
+        ...data,
+        supplier: toTitleCase(data.supplier),
+        items: data.items.map((item: InvoiceItem) => ({
+          ...item,
+          name: toTitleCase(item.name)
+        }))
+      }
+
+      setInvoiceData(formattedData)
 
       // Hacer matching automático de productos
-      const matches = performMatching(data.items)
+      const matches = performMatching(formattedData.items)
       setItemMatches(matches)
 
       setStep('review')
@@ -209,14 +220,14 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoice
       newMatches[index] = {
         ...newMatches[index],
         selectedArticleId: articleId,
-        matchScore: advancedSimilarity(invoiceData?.items[index]?.name || '', selectedArticle.name)
+        matchScore: productMatchingScore(invoiceData?.items[index]?.name || '', selectedArticle.name)
       }
       setItemMatches(newMatches)
     }
   }
 
   const getMatchIndicator = (score: number) => {
-    if (score >= 0.85) {
+    if (score >= 0.7) {
       return {
         icon: <CheckCircle className="text-green-600" size={20} />,
         color: 'text-green-600',
@@ -224,7 +235,7 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoice
         bgColor: 'bg-green-50',
         borderColor: 'border-green-200'
       }
-    } else if (score >= 0.5) {
+    } else if (score >= 0.4) {
       return {
         icon: <AlertTriangle className="text-yellow-600" size={20} />,
         color: 'text-yellow-600',

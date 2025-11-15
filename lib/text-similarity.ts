@@ -188,3 +188,109 @@ export function extractProductName(ocrLine: string): string {
 
   return cleaned
 }
+
+/**
+ * Convierte texto a formato título (Primera Letra Mayúscula)
+ * Ejemplo: "ZANAHORIA BOLSA" -> "Zanahoria Bolsa"
+ */
+export function toTitleCase(text: string): string {
+  return text
+    .toLowerCase()
+    .split(' ')
+    .map(word => {
+      if (word.length === 0) return word
+      // Excepciones comunes (artículos, preposiciones)
+      const exceptions = ['de', 'del', 'la', 'el', 'los', 'las', 'y', 'o', 'en', 'con', 'sin', 'para', 'por']
+      if (exceptions.includes(word)) {
+        return word
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1)
+    })
+    .join(' ')
+    // Capitalizar la primera palabra siempre
+    .replace(/^./, str => str.toUpperCase())
+}
+
+/**
+ * Algoritmo mejorado de matching que prioriza las primeras 2-3 palabras
+ * Útil para casos como "ZANAHORTA BOLSA 1K" vs "Zanahoria"
+ */
+export function productMatchingScore(invoiceProduct: string, inventoryProduct: string): number {
+  const norm1 = normalizeText(invoiceProduct)
+  const norm2 = normalizeText(inventoryProduct)
+
+  // Estrategia 1: Coincidencia exacta normalizada
+  if (norm1 === norm2) return 1.0
+
+  // Estrategia 2: Uno contiene al otro
+  if (norm1.includes(norm2) || norm2.includes(norm1)) {
+    const lengthRatio = Math.min(norm1.length, norm2.length) / Math.max(norm1.length, norm2.length)
+    return 0.85 + (0.15 * lengthRatio)
+  }
+
+  // Estrategia 3: Análisis de primeras palabras (MUY IMPORTANTE)
+  const words1 = norm1.split(' ').filter(w => w.length > 0)
+  const words2 = norm2.split(' ').filter(w => w.length > 0)
+
+  if (words1.length === 0 || words2.length === 0) return 0
+
+  // Tomar las primeras 3 palabras de cada uno
+  const firstWords1 = words1.slice(0, 3)
+  const firstWords2 = words2.slice(0, 3)
+
+  // Calcular similitud de la primera palabra (peso alto: 50%)
+  const firstWordScore = similarityScore(firstWords1[0] || '', firstWords2[0] || '')
+
+  // Si la primera palabra es muy similar (>0.7), ya tenemos un buen match
+  if (firstWordScore >= 0.7) {
+    // Dar score base alto y mejorar con palabras adicionales
+    let score = 0.7 + (firstWordScore - 0.7) * 0.5 // 0.7 a 0.85
+
+    // Revisar segunda palabra si existe (peso medio: 20%)
+    if (firstWords1.length > 1 && firstWords2.length > 1) {
+      const secondWordScore = similarityScore(firstWords1[1], firstWords2[1])
+      score += secondWordScore * 0.1
+    }
+
+    // Revisar tercera palabra si existe (peso bajo: 10%)
+    if (firstWords1.length > 2 && firstWords2.length > 2) {
+      const thirdWordScore = similarityScore(firstWords1[2], firstWords2[2])
+      score += thirdWordScore * 0.05
+    }
+
+    return Math.min(score, 0.95) // Máximo 0.95 para este método
+  }
+
+  // Estrategia 4: Matching de palabras en general
+  let matchingWords = 0
+  const minWords = Math.min(firstWords1.length, firstWords2.length)
+
+  for (let i = 0; i < minWords; i++) {
+    const word1 = firstWords1[i]
+    const word2 = firstWords2[i]
+
+    // Similitud exacta
+    if (word1 === word2) {
+      matchingWords += 1.0
+    }
+    // Similitud por contención
+    else if (word1.includes(word2) || word2.includes(word1)) {
+      matchingWords += 0.7
+    }
+    // Similitud por Levenshtein
+    else {
+      const sim = similarityScore(word1, word2)
+      if (sim >= 0.6) {
+        matchingWords += sim * 0.5
+      }
+    }
+  }
+
+  const wordScore = matchingWords / Math.max(firstWords1.length, firstWords2.length, 1)
+
+  // Estrategia 5: Similitud de caracteres como fallback
+  const charScore = similarityScore(norm1, norm2)
+
+  // Combinar scores dando más peso al matching de palabras
+  return Math.max(wordScore * 0.7 + charScore * 0.3, charScore * 0.6)
+}
