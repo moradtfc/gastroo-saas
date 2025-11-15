@@ -66,12 +66,28 @@ function parseInvoiceText(text: string): InvoiceData {
   // Normalizar texto primero
   const normalizedText = normalizeOCRText(text)
 
+  console.log('=== LIMPIEZA DE LÍNEAS ===')
+
   // Limpiar cada línea: eliminar espacios y "|" del inicio antes de procesarlas
   // Esto mejora significativamente la detección de productos
-  const lines = normalizedText
-    .split('\n')
-    .map(line => cleanLinePrefix(line))
+  const rawLines = normalizedText.split('\n')
+  const lines = rawLines
+    .map((line, index) => {
+      const cleaned = cleanLinePrefix(line)
+      if (line !== cleaned && line.trim().length > 0) {
+        console.log(`Línea ${index + 1} LIMPIADA:`)
+        console.log(`  Antes:   "${line}"`)
+        console.log(`  Después: "${cleaned}"`)
+      }
+      return cleaned
+    })
     .filter(line => line.trim().length > 0)
+
+  console.log(`Total de líneas procesadas: ${rawLines.length}`)
+  console.log(`Líneas válidas después de limpieza: ${lines.length}`)
+  console.log('\n=== TEXTO LIMPIO COMPLETO ===')
+  console.log(lines.join('\n'))
+  console.log('=== FIN LIMPIEZA ===\n')
 
   // Extraer proveedor (usualmente en las primeras líneas)
   const supplier = extractSupplier(lines)
