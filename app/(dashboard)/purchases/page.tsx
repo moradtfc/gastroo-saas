@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect, useRef } from "react"
-import { Search, Filter, ChevronDown, Plus, MoreVertical, Calendar, Building, Package, Eye, Edit, Trash2, Upload, ChevronLeft, ChevronRight, X, Sparkles } from "lucide-react"
+import { Search, Filter, ChevronDown, Plus, MoreVertical, Calendar, Building, Package, Eye, Edit, Trash2, Upload, ChevronLeft, ChevronRight, X } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { DatabaseService } from "@/lib/database"
@@ -571,18 +571,11 @@ export default function PurchasesPage() {
 
           <button
             onClick={() => setShowUploadModal(true)}
-            className="px-4 py-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+            className="px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg font-medium transition-colors shadow-sm cursor-pointer whitespace-nowrap flex items-center gap-2"
           >
             <Upload size={18} />
             Subir factura
           </button>
-
-          <Link href="/purchases/process-invoice">
-            <button className="px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg font-medium transition-colors shadow-sm cursor-pointer whitespace-nowrap flex items-center gap-2">
-              <Sparkles size={18} />
-              Procesar Factura (OCR)
-            </button>
-          </Link>
 
           <Link href="/purchases/create">
             <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm cursor-pointer whitespace-nowrap">
