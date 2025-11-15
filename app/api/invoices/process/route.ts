@@ -106,9 +106,10 @@ export async function POST(request: NextRequest) {
     console.log('Procesando factura con Gemini AI...')
     console.log(`Tamaño de imagen: ${(bytes.byteLength / 1024).toFixed(2)} KB`)
 
-    // Configurar el modelo Gemini que soporta visión
-    // gemini-pro-vision es el modelo que acepta imágenes
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro-vision' })
+    // Configurar el modelo Gemini 1.5 Flash
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-1.5-flash'
+    })
 
     // Generar contenido con la imagen y el prompt
     const result = await model.generateContent([
