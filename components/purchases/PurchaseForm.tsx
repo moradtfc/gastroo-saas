@@ -580,7 +580,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
         unit_id: quickCreateArticleData.unitId,
         default_unit_id: quickCreateArticleData.unitId,
         cost_per_unit: parseFloat(quickCreateArticleData.costPerUnit),
-        current_stock: parseFloat(quickCreateArticleData.currentStock),
+        current_stock: 0, // Se crea con stock 0, el inventario se actualizará al guardar la compra
         category: selectedCategory?.name || undefined,
         unit: selectedUnit?.symbol || selectedUnit?.name || undefined
       }
