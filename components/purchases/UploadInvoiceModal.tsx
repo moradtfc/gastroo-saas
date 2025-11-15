@@ -80,29 +80,60 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess, onNavigateToCre
   }
 
   const performMatching = (items: InvoiceItem[]): ItemMatch[] => {
-    return items.map(item => {
-      // Calcular scores para todos los artículos usando el algoritmo mejorado
+    // Rastrear artículos ya asignados para evitar duplicados
+    const usedArticleIds = new Set<string>()
+
+    // Calcular todos los matches posibles para cada item
+    const itemsWithMatches = items.map((item, itemIndex) => {
       const scoredArticles = articles.map(article => ({
         article,
         score: productMatchingScore(item.name, article.name)
       }))
 
-      // Ordenar por score descendente
       scoredArticles.sort((a, b) => b.score - a.score)
 
-      // Tomar los top 5
-      const suggestedArticles = scoredArticles.slice(0, 5)
-
-      // Auto-seleccionar si el score es alto (>= 0.7 para ser más selectivo)
-      const bestMatch = suggestedArticles[0]
-      const selectedArticleId = bestMatch && bestMatch.score >= 0.7 ? bestMatch.article.id : null
-
       return {
+        itemIndex,
+        item,
+        scoredArticles
+      }
+    })
+
+    // Ordenar items por mejor score (de mayor a menor) para asignar primero los matches más fuertes
+    itemsWithMatches.sort((a, b) => {
+      const bestScoreA = a.scoredArticles[0]?.score || 0
+      const bestScoreB = b.scoredArticles[0]?.score || 0
+      return bestScoreB - bestScoreA
+    })
+
+    // Crear array de resultados en el orden original
+    const results: ItemMatch[] = new Array(items.length)
+
+    // Asignar matches evitando duplicados
+    for (const { itemIndex, item, scoredArticles } of itemsWithMatches) {
+      // Filtrar artículos ya usados
+      const availableArticles = scoredArticles.filter(sa => !usedArticleIds.has(sa.article.id))
+
+      // Tomar los top 5 disponibles para sugerencias
+      const suggestedArticles = availableArticles.slice(0, 5)
+
+      // Auto-seleccionar si el mejor match disponible tiene score >= 0.7
+      const bestMatch = suggestedArticles[0]
+      let selectedArticleId: string | null = null
+
+      if (bestMatch && bestMatch.score >= 0.7) {
+        selectedArticleId = bestMatch.article.id
+        usedArticleIds.add(selectedArticleId) // Marcar como usado
+      }
+
+      results[itemIndex] = {
         selectedArticleId,
         matchScore: bestMatch ? bestMatch.score : 0,
         suggestedArticles
       }
-    })
+    }
+
+    return results
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
