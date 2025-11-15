@@ -217,11 +217,9 @@ export default function PurchasesPage() {
     try {
       setLoading(true)
 
-      // Validar artículos contra inventario
-      const articles = await DatabaseService.getArticles()
       const suppliers = await DatabaseService.getSuppliers()
 
-      // Buscar o crear proveedor
+      // Buscar proveedor
       let supplier = suppliers?.find(s =>
         s.name.toLowerCase().includes(data.supplier.toLowerCase()) ||
         data.supplier.toLowerCase().includes(s.name.toLowerCase())
@@ -233,36 +231,34 @@ export default function PurchasesPage() {
         return
       }
 
-      // Validar artículos y preparar items
+      // Preparar items usando los artículos seleccionados en el modal
       const validatedItems = []
-      const missingArticles = []
+      const articles = await DatabaseService.getArticles()
 
-      for (const item of data.items) {
-        const article = articles?.find(a =>
-          a.name.toLowerCase().includes(item.name.toLowerCase()) ||
-          item.name.toLowerCase().includes(a.name.toLowerCase())
-        )
+      for (let i = 0; i < data.items.length; i++) {
+        const item = data.items[i]
+        const match = data.itemMatches[i]
 
-        if (article) {
-          validatedItems.push({
-            article_id: article.id,
-            quantity: item.quantity,
-            unit: article.unit_id || article.default_unit_id,
-            unit_cost: item.price,
-            total_cost: item.total
-          })
-        } else {
-          missingArticles.push(item.name)
+        if (!match?.selectedArticleId) {
+          toast.error('Todos los productos deben tener un artículo asignado')
+          setLoading(false)
+          return
         }
-      }
 
-      if (missingArticles.length > 0) {
-        toast.error(
-          `Los siguientes artículos no existen en tu inventario: ${missingArticles.join(', ')}. Por favor créalos primero.`,
-          { duration: 8000 }
-        )
-        setLoading(false)
-        return
+        const article = articles?.find(a => a.id === match.selectedArticleId)
+        if (!article) {
+          toast.error(`Artículo no encontrado: ${item.name}`)
+          setLoading(false)
+          return
+        }
+
+        validatedItems.push({
+          article_id: article.id,
+          quantity: item.quantity,
+          unit: article.unit_id || article.default_unit_id,
+          unit_cost: item.price,
+          total_cost: item.total
+        })
       }
 
       // Crear compra
@@ -278,11 +274,10 @@ export default function PurchasesPage() {
       await DatabaseService.createPurchase(purchaseData)
 
       // Actualizar inventario automáticamente
-      for (const item of data.items) {
-        const article = articles?.find(a =>
-          a.name.toLowerCase().includes(item.name.toLowerCase()) ||
-          item.name.toLowerCase().includes(a.name.toLowerCase())
-        )
+      for (let i = 0; i < data.items.length; i++) {
+        const item = data.items[i]
+        const match = data.itemMatches[i]
+        const article = articles?.find(a => a.id === match.selectedArticleId)
 
         if (article) {
           const currentStock = article.current_stock || 0
@@ -291,8 +286,8 @@ export default function PurchasesPage() {
 
           // Calcular precio promedio ponderado
           const totalCurrentValue = currentStock * currentPrice
-          const totalNewValue = item.quantity * (item.price / item.quantity)
-          const averagePrice = newStock > 0 ? (totalCurrentValue + totalNewValue) / newStock : (item.price / item.quantity)
+          const totalNewValue = item.quantity * item.price
+          const averagePrice = newStock > 0 ? (totalCurrentValue + totalNewValue) / newStock : item.price
 
           await DatabaseService.updateIngredient(article.id, {
             current_stock: newStock,

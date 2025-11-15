@@ -1,12 +1,14 @@
 "use client"
 
-import React, { useState, useCallback } from "react"
+import React, { useState, useCallback, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Upload, X, FileText, Loader2, Check, Edit2 } from "lucide-react"
+import { Upload, X, FileText, Loader2, Check, Edit2, CheckCircle, AlertTriangle, XCircle } from "lucide-react"
 import { toast } from "sonner"
 import Image from "next/image"
+import { DatabaseService } from "@/lib/database"
+import { advancedSimilarity } from "@/lib/text-similarity"
 
 interface InvoiceItem {
   name: string
@@ -14,6 +16,29 @@ interface InvoiceItem {
   unit: string
   price: number
   total: number
+}
+
+interface Article {
+  id: string
+  name: string
+  current_stock: number
+  cost_per_unit: number
+  unit_id?: string
+  default_unit_id?: string
+  units?: {
+    id: string
+    name: string
+    abbreviation: string
+  }
+}
+
+interface ItemMatch {
+  selectedArticleId: string | null
+  matchScore: number
+  suggestedArticles: Array<{
+    article: Article
+    score: number
+  }>
 }
 
 interface InvoiceData {
@@ -27,7 +52,7 @@ interface InvoiceData {
 interface UploadInvoiceModalProps {
   isOpen: boolean
   onClose: () => void
-  onSuccess: (data: InvoiceData & { purchaseName: string; status: string }) => void
+  onSuccess: (data: InvoiceData & { purchaseName: string; status: string; itemMatches: ItemMatch[] }) => void
 }
 
 export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoiceModalProps) {
@@ -38,6 +63,51 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoice
   const [invoiceData, setInvoiceData] = useState<InvoiceData | null>(null)
   const [purchaseName, setPurchaseName] = useState("")
   const [status, setStatus] = useState("paid")
+  const [articles, setArticles] = useState<Article[]>([])
+  const [itemMatches, setItemMatches] = useState<ItemMatch[]>([])
+
+  // Cargar artículos del inventario cuando se abre el modal
+  useEffect(() => {
+    if (isOpen) {
+      loadArticles()
+    }
+  }, [isOpen])
+
+  const loadArticles = async () => {
+    try {
+      const data = await DatabaseService.getArticles()
+      setArticles(data || [])
+    } catch (error) {
+      console.error('Error loading articles:', error)
+      toast.error('Error al cargar el inventario')
+    }
+  }
+
+  const performMatching = (items: InvoiceItem[]): ItemMatch[] => {
+    return items.map(item => {
+      // Calcular scores para todos los artículos
+      const scoredArticles = articles.map(article => ({
+        article,
+        score: advancedSimilarity(item.name, article.name)
+      }))
+
+      // Ordenar por score descendente
+      scoredArticles.sort((a, b) => b.score - a.score)
+
+      // Tomar los top 5
+      const suggestedArticles = scoredArticles.slice(0, 5)
+
+      // Auto-seleccionar si el score es alto
+      const bestMatch = suggestedArticles[0]
+      const selectedArticleId = bestMatch && bestMatch.score >= 0.5 ? bestMatch.article.id : null
+
+      return {
+        selectedArticleId,
+        matchScore: bestMatch ? bestMatch.score : 0,
+        suggestedArticles
+      }
+    })
+  }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -80,6 +150,11 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoice
 
       const data = await response.json()
       setInvoiceData(data)
+
+      // Hacer matching automático de productos
+      const matches = performMatching(data.items)
+      setItemMatches(matches)
+
       setStep('review')
       toast.success("Factura procesada exitosamente")
     } catch (error: any) {
@@ -99,10 +174,18 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoice
       return
     }
 
+    // Validar que todos los items tengan un artículo seleccionado
+    const hasUnmatchedItems = itemMatches.some(match => !match.selectedArticleId)
+    if (hasUnmatchedItems) {
+      toast.error("Por favor selecciona un artículo para todos los productos de la factura")
+      return
+    }
+
     onSuccess({
       ...invoiceData,
       purchaseName: purchaseName.trim(),
-      status
+      status,
+      itemMatches
     })
     handleClose()
   }
@@ -114,7 +197,50 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoice
     setInvoiceData(null)
     setPurchaseName("")
     setStatus("paid")
+    setItemMatches([])
     onClose()
+  }
+
+  const updateItemMatch = (index: number, articleId: string) => {
+    const newMatches = [...itemMatches]
+    const selectedArticle = articles.find(a => a.id === articleId)
+
+    if (selectedArticle) {
+      newMatches[index] = {
+        ...newMatches[index],
+        selectedArticleId: articleId,
+        matchScore: advancedSimilarity(invoiceData?.items[index]?.name || '', selectedArticle.name)
+      }
+      setItemMatches(newMatches)
+    }
+  }
+
+  const getMatchIndicator = (score: number) => {
+    if (score >= 0.85) {
+      return {
+        icon: <CheckCircle className="text-green-600" size={20} />,
+        color: 'text-green-600',
+        label: 'Excelente coincidencia',
+        bgColor: 'bg-green-50',
+        borderColor: 'border-green-200'
+      }
+    } else if (score >= 0.5) {
+      return {
+        icon: <AlertTriangle className="text-yellow-600" size={20} />,
+        color: 'text-yellow-600',
+        label: 'Posible coincidencia',
+        bgColor: 'bg-yellow-50',
+        borderColor: 'border-yellow-200'
+      }
+    } else {
+      return {
+        icon: <XCircle className="text-red-600" size={20} />,
+        color: 'text-red-600',
+        label: 'Sin coincidencia',
+        bgColor: 'bg-red-50',
+        borderColor: 'border-red-200'
+      }
+    }
   }
 
   const updateItem = (index: number, field: keyof InvoiceItem, value: any) => {
@@ -288,62 +414,99 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoice
                 <h3 className="font-semibold text-gray-900">Artículos ({invoiceData.items.length})</h3>
 
                 <div className="space-y-3">
-                  {invoiceData.items.map((item, index) => (
-                    <div key={index} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
-                      <div className="grid grid-cols-12 gap-3">
-                        <div className="col-span-4">
-                          <label className="block text-xs font-semibold text-gray-600 mb-1">Producto</label>
-                          <Input
-                            value={item.name}
-                            onChange={(e) => updateItem(index, 'name', e.target.value)}
-                            className="w-full"
-                          />
-                        </div>
-                        <div className="col-span-2">
-                          <label className="block text-xs font-semibold text-gray-600 mb-1">Cantidad</label>
-                          <Input
-                            type="number"
-                            step="0.001"
-                            value={item.quantity}
-                            onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
-                            className="w-full"
-                          />
-                        </div>
-                        <div className="col-span-2">
-                          <label className="block text-xs font-semibold text-gray-600 mb-1">Unidad</label>
-                          <Input
-                            value={item.unit}
-                            onChange={(e) => updateItem(index, 'unit', e.target.value)}
-                            className="w-full"
-                          />
-                        </div>
-                        <div className="col-span-2">
-                          <label className="block text-xs font-semibold text-gray-600 mb-1">Precio</label>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={item.price}
-                            onChange={(e) => updateItem(index, 'price', parseFloat(e.target.value) || 0)}
-                            className="w-full"
-                          />
-                        </div>
-                        <div className="col-span-1">
-                          <label className="block text-xs font-semibold text-gray-600 mb-1">Total</label>
-                          <div className="px-2 py-2 bg-gray-200 rounded-lg text-xs font-semibold text-center">
-                            {invoiceData.currency}{item.total.toFixed(2)}
+                  {invoiceData.items.map((item, index) => {
+                    const match = itemMatches[index]
+                    const indicator = match ? getMatchIndicator(match.matchScore) : getMatchIndicator(0)
+                    const selectedArticle = match?.selectedArticleId
+                      ? articles.find(a => a.id === match.selectedArticleId)
+                      : null
+
+                    return (
+                      <div key={index} className={`p-4 border rounded-lg ${indicator.bgColor} ${indicator.borderColor}`}>
+                        {/* Producto detectado */}
+                        <div className="mb-3 flex items-start gap-2">
+                          {indicator.icon}
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-900">{item.name}</div>
+                            <div className="text-sm text-gray-600">
+                              {item.quantity} {item.unit} • {invoiceData.currency}{item.price.toFixed(2)} • Total: {invoiceData.currency}{item.total.toFixed(2)}
+                            </div>
                           </div>
-                        </div>
-                        <div className="col-span-1 flex items-end">
                           <button
                             onClick={() => removeItem(index)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
+                            className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
                           >
                             <X size={16} />
                           </button>
                         </div>
+
+                        {/* Selector de artículo del inventario */}
+                        <div className="space-y-2">
+                          <label className="block text-xs font-semibold text-gray-700">
+                            Artículo en inventario {match?.selectedArticleId ? '' : '(Obligatorio)'}
+                          </label>
+                          <select
+                            value={match?.selectedArticleId || ''}
+                            onChange={(e) => updateItemMatch(index, e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          >
+                            <option value="">Seleccionar artículo...</option>
+                            {match?.suggestedArticles.map(({ article, score }) => (
+                              <option key={article.id} value={article.id}>
+                                {article.name} ({Math.round(score * 100)}% coincidencia)
+                              </option>
+                            ))}
+                            <option disabled>──────────</option>
+                            {articles
+                              .filter(a => !match?.suggestedArticles.some(s => s.article.id === a.id))
+                              .map(article => (
+                                <option key={article.id} value={article.id}>
+                                  {article.name}
+                                </option>
+                              ))}
+                          </select>
+
+                          {selectedArticle && (
+                            <div className="text-xs text-gray-600 bg-white p-2 rounded border border-gray-200">
+                              Stock actual: {selectedArticle.current_stock} {selectedArticle.units?.abbreviation || selectedArticle.units?.name || 'uds'}
+                              {' • '}
+                              Costo: {invoiceData.currency}{selectedArticle.cost_per_unit?.toFixed(2) || '0.00'}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Editar datos del item */}
+                        <div className="grid grid-cols-3 gap-2 mt-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Cantidad</label>
+                            <Input
+                              type="number"
+                              step="0.001"
+                              value={item.quantity}
+                              onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Precio Unit.</label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={item.price}
+                              onChange={(e) => updateItem(index, 'price', parseFloat(e.target.value) || 0)}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Total</label>
+                            <div className="px-3 py-2 bg-gray-200 rounded-lg text-sm font-semibold text-center">
+                              {invoiceData.currency}{item.total.toFixed(2)}
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
 
                 <div className="flex justify-between items-center p-4 bg-blue-50 rounded-lg border border-blue-200">
