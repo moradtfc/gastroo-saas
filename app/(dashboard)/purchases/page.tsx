@@ -213,97 +213,8 @@ export default function PurchasesPage() {
 
   const hasActiveFilters = statusFilter !== "all" || dateFrom || dateTo || sortField !== null
 
-  const handleInvoiceSuccess = async (data: any) => {
-    try {
-      setLoading(true)
-
-      const suppliers = await DatabaseService.getSuppliers()
-
-      // Buscar proveedor
-      let supplier = suppliers?.find(s =>
-        s.name.toLowerCase().includes(data.supplier.toLowerCase()) ||
-        data.supplier.toLowerCase().includes(s.name.toLowerCase())
-      )
-
-      if (!supplier) {
-        toast.info(`Proveedor "${data.supplier}" no encontrado. Créalo primero en la sección de Proveedores.`)
-        setLoading(false)
-        return
-      }
-
-      // Preparar items usando los artículos seleccionados en el modal
-      const validatedItems = []
-      const articles = await DatabaseService.getArticles()
-
-      for (let i = 0; i < data.items.length; i++) {
-        const item = data.items[i]
-        const match = data.itemMatches[i]
-
-        if (!match?.selectedArticleId) {
-          toast.error('Todos los productos deben tener un artículo asignado')
-          setLoading(false)
-          return
-        }
-
-        const article = articles?.find(a => a.id === match.selectedArticleId)
-        if (!article) {
-          toast.error(`Artículo no encontrado: ${item.name}`)
-          setLoading(false)
-          return
-        }
-
-        validatedItems.push({
-          article_id: article.id,
-          quantity: item.quantity,
-          unit: article.unit_id || article.default_unit_id,
-          unit_cost: item.price,
-          total_cost: item.total
-        })
-      }
-
-      // Crear compra
-      const purchaseData = {
-        name: data.purchaseName,
-        supplier_id: supplier.id,
-        purchase_date: data.date,
-        total_amount: data.subtotal,
-        status: data.status,
-        items: validatedItems
-      }
-
-      await DatabaseService.createPurchase(purchaseData)
-
-      // Actualizar inventario automáticamente
-      for (let i = 0; i < data.items.length; i++) {
-        const item = data.items[i]
-        const match = data.itemMatches[i]
-        const article = articles?.find(a => a.id === match.selectedArticleId)
-
-        if (article) {
-          const currentStock = article.current_stock || 0
-          const currentPrice = article.cost_per_unit || 0
-          const newStock = currentStock + item.quantity
-
-          // Calcular precio promedio ponderado
-          const totalCurrentValue = currentStock * currentPrice
-          const totalNewValue = item.quantity * item.price
-          const averagePrice = newStock > 0 ? (totalCurrentValue + totalNewValue) / newStock : item.price
-
-          await DatabaseService.updateIngredient(article.id, {
-            current_stock: newStock,
-            cost_per_unit: averagePrice
-          })
-        }
-      }
-
-      toast.success("Compra creada exitosamente desde la factura")
-      await loadPurchases()
-    } catch (error: any) {
-      console.error('Error creating purchase from invoice:', error)
-      toast.error(error.message || "Error al crear la compra")
-    } finally {
-      setLoading(false)
-    }
+  const handleNavigateToCreate = () => {
+    router.push('/purchases/create')
   }
 
   // Cálculos de estadísticas
@@ -779,7 +690,8 @@ export default function PurchasesPage() {
       <UploadInvoiceModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
-        onSuccess={handleInvoiceSuccess}
+        onSuccess={() => {}} // No longer used
+        onNavigateToCreate={handleNavigateToCreate}
       />
     </div>
   )

@@ -58,6 +58,14 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
   const [selectedArticles, setSelectedArticles] = useState<Article[]>([])
   const [items, setItems] = useState<PurchaseItem[]>([])
   const [openUnitSelect, setOpenUnitSelect] = useState<string | null>(null)
+  const [unmatchedItems, setUnmatchedItems] = useState<Array<{
+    name: string
+    quantity: number
+    unit: string
+    price: number
+    total: number
+  }>>([])
+  const [assigningItemIndex, setAssigningItemIndex] = useState<number | null>(null)
 
   const [formData, setFormData] = useState({
     name: "",
@@ -191,6 +199,88 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     }
   }
 
+  // Procesar datos de factura si existen en sessionStorage
+  useEffect(() => {
+    if (!isEditMode && articles.length > 0 && suppliers.length > 0 && units.length > 0) {
+      const invoiceDataStr = sessionStorage.getItem('invoiceData')
+      if (invoiceDataStr) {
+        try {
+          const invoiceData = JSON.parse(invoiceDataStr)
+
+          // Limpiar sessionStorage
+          sessionStorage.removeItem('invoiceData')
+
+          // Prellenar formulario
+          setFormData({
+            name: invoiceData.purchaseName,
+            description: `Factura procesada automáticamente - ${invoiceData.supplier}`,
+            purchaseDate: invoiceData.date,
+            status: invoiceData.status
+          })
+
+          // Buscar proveedor
+          const supplier = suppliers.find(s =>
+            s.name.toLowerCase().includes(invoiceData.supplier.toLowerCase()) ||
+            invoiceData.supplier.toLowerCase().includes(s.name.toLowerCase())
+          )
+          if (supplier) {
+            setSelectedSupplier(supplier)
+          }
+
+          // Procesar items
+          const matchedItems: PurchaseItem[] = []
+          const unmatched: typeof unmatchedItems = []
+
+          invoiceData.items.forEach((item: any) => {
+            if (item.matchedArticleId && item.matchScore >= 0.7) {
+              // Tiene match alto - añadir automáticamente
+              const article = articles.find(a => a.id === item.matchedArticleId)
+              if (article) {
+                const compatibleUnits = getCompatibleUnits(article)
+                const defaultUnit = compatibleUnits[0]
+
+                matchedItems.push({
+                  id: Date.now().toString() + Math.random(),
+                  articleId: article.id,
+                  articleName: article.name,
+                  unit: defaultUnit?.name || 'unidad',
+                  unitId: defaultUnit?.id || '',
+                  unitSymbol: defaultUnit?.symbol || 'ud',
+                  quantity: item.quantity,
+                  price: item.price,
+                  total: item.total,
+                  availableUnits: compatibleUnits
+                })
+              }
+            } else {
+              // Sin match - añadir a lista de no coincidentes
+              unmatched.push({
+                name: item.name,
+                quantity: item.quantity,
+                unit: item.unit,
+                price: item.price,
+                total: item.total
+              })
+            }
+          })
+
+          setItems(matchedItems)
+          setUnmatchedItems(unmatched)
+
+          if (matchedItems.length > 0) {
+            toast.success(`${matchedItems.length} artículo(s) añadido(s) automáticamente`)
+          }
+          if (unmatched.length > 0) {
+            toast.info(`${unmatched.length} producto(s) requieren asignación manual`)
+          }
+        } catch (error) {
+          console.error('Error processing invoice data:', error)
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [articles, suppliers, units, isEditMode])
+
   const getCompatibleUnitsForArticle = (article: Article, allUnits: Unit[]): Unit[] => {
     const articleUnitInfo = article.unit_info || article.default_unit_info
     const articleUnitId = article.unit_id || article.default_unit_id
@@ -274,6 +364,36 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
   }
 
   const saveSelectedArticles = () => {
+    // Si estamos asignando artículo a un item sin match
+    if (assigningItemIndex !== null && selectedArticles.length === 1) {
+      const unmatchedItem = unmatchedItems[assigningItemIndex]
+      const article = selectedArticles[0]
+      const compatibleUnits = getCompatibleUnits(article)
+      const defaultUnit = compatibleUnits[0]
+
+      const newItem: PurchaseItem = {
+        id: Date.now().toString() + Math.random(),
+        articleId: article.id,
+        articleName: article.name,
+        unit: defaultUnit?.name || 'unidad',
+        unitId: defaultUnit?.id || '',
+        unitSymbol: defaultUnit?.symbol || 'ud',
+        quantity: unmatchedItem.quantity,
+        price: unmatchedItem.price,
+        total: unmatchedItem.total,
+        availableUnits: compatibleUnits
+      }
+
+      setItems(prev => [...prev, newItem])
+      setUnmatchedItems(prev => prev.filter((_, i) => i !== assigningItemIndex))
+      setSelectedArticles([])
+      setIsArticleModalOpen(false)
+      setAssigningItemIndex(null)
+      toast.success('Artículo asignado correctamente')
+      return
+    }
+
+    // Añadir artículos normalmente
     const newItems: PurchaseItem[] = selectedArticles.map(article => {
       const compatibleUnits = getCompatibleUnits(article)
       const defaultUnit = compatibleUnits[0]
@@ -296,6 +416,18 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     setSelectedArticles([])
     setIsArticleModalOpen(false)
     toast.success(`${newItems.length} artículo(s) añadido(s)`)
+  }
+
+  const handleAssignArticle = (index: number) => {
+    setAssigningItemIndex(index)
+    setSelectedArticles([])
+    setIsArticleModalOpen(true)
+  }
+
+  const handleCancelAssign = () => {
+    setAssigningItemIndex(null)
+    setSelectedArticles([])
+    setIsArticleModalOpen(false)
   }
 
   const removeItem = (id: string) => {
@@ -554,8 +686,14 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
       }}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle className="text-xl">Añadir Artículos</DialogTitle>
-            <p className="text-sm text-gray-600 mt-1">Busca y añade artículos de tu inventario</p>
+            <DialogTitle className="text-xl">
+              {assigningItemIndex !== null ? 'Asignar Artículo' : 'Añadir Artículos'}
+            </DialogTitle>
+            <p className="text-sm text-gray-600 mt-1">
+              {assigningItemIndex !== null
+                ? `Selecciona un artículo para: ${unmatchedItems[assigningItemIndex]?.name}`
+                : 'Busca y añade artículos de tu inventario'}
+            </p>
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto">
@@ -637,13 +775,30 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
             </div>
           </div>
 
-          <DialogFooter className="border-t pt-4 mt-4">
+          <DialogFooter className="border-t pt-4 mt-4 flex gap-2">
+            {assigningItemIndex !== null && (
+              <Button
+                variant="outline"
+                onClick={handleCancelAssign}
+                className="flex-1"
+              >
+                Cancelar
+              </Button>
+            )}
             <Button
               onClick={saveSelectedArticles}
-              disabled={selectedArticles.length === 0}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              disabled={
+                assigningItemIndex !== null
+                  ? selectedArticles.length !== 1
+                  : selectedArticles.length === 0
+              }
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
             >
-              Guardar ({selectedArticles.length})
+              {assigningItemIndex !== null
+                ? selectedArticles.length === 1
+                  ? 'Asignar artículo'
+                  : 'Selecciona 1 artículo'
+                : `Guardar (${selectedArticles.length})`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -897,8 +1052,45 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                 </button>
               </div>
 
+              {/* Productos sin match (requieren asignación manual) */}
+              {unmatchedItems.length > 0 && (
+                <div className="mb-6 space-y-3">
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-yellow-800 mb-2">
+                      Productos sin coincidencia ({unmatchedItems.length})
+                    </h3>
+                    <p className="text-xs text-yellow-700">
+                      Los siguientes productos de la factura no tienen un match automático. Asigna un artículo de tu inventario a cada uno.
+                    </p>
+                  </div>
+
+                  {unmatchedItems.map((item, index) => (
+                    <div
+                      key={index}
+                      className="p-4 border-2 border-orange-300 rounded-lg bg-orange-50"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-gray-900 mb-1">{item.name}</h4>
+                          <p className="text-sm text-gray-600">
+                            {item.quantity} {item.unit} • €{item.price.toFixed(2)} c/u • Total: €{item.total.toFixed(2)}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleAssignArticle(index)}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-2"
+                        >
+                          <Search size={16} />
+                          Asignar artículo
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Banner informativo cuando está vacío */}
-              {items.length === 0 && (
+              {items.length === 0 && unmatchedItems.length === 0 && (
                 <div className="bg-gradient-to-r from-slate-50 to-blue-50 p-4 rounded-lg border border-slate-200 mb-4">
                   <div className="flex items-center gap-3">
                     <div className="flex-shrink-0 w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">

@@ -53,9 +53,10 @@ interface UploadInvoiceModalProps {
   isOpen: boolean
   onClose: () => void
   onSuccess: (data: InvoiceData & { purchaseName: string; status: string; itemMatches: ItemMatch[] }) => void
+  onNavigateToCreate?: () => void
 }
 
-export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoiceModalProps) {
+export function UploadInvoiceModal({ isOpen, onClose, onSuccess, onNavigateToCreate }: UploadInvoiceModalProps) {
   const [step, setStep] = useState<'upload' | 'processing' | 'review'>('upload')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -185,19 +186,32 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess }: UploadInvoice
       return
     }
 
-    // Validar que todos los items tengan un artículo seleccionado
-    const hasUnmatchedItems = itemMatches.some(match => !match.selectedArticleId)
-    if (hasUnmatchedItems) {
-      toast.error("Por favor selecciona un artículo para todos los productos de la factura")
-      return
+    // Guardar datos en sessionStorage para pasarlos a la página create
+    const invoiceSessionData = {
+      supplier: invoiceData.supplier,
+      date: invoiceData.date,
+      purchaseName: purchaseName.trim(),
+      status: status,
+      currency: invoiceData.currency,
+      subtotal: invoiceData.subtotal,
+      items: invoiceData.items.map((item, index) => ({
+        name: item.name,
+        quantity: item.quantity,
+        unit: item.unit,
+        price: item.price,
+        total: item.total,
+        matchedArticleId: itemMatches[index]?.selectedArticleId || null,
+        matchScore: itemMatches[index]?.matchScore || 0
+      }))
     }
 
-    onSuccess({
-      ...invoiceData,
-      purchaseName: purchaseName.trim(),
-      status,
-      itemMatches
-    })
+    sessionStorage.setItem('invoiceData', JSON.stringify(invoiceSessionData))
+
+    // Navegar a create
+    if (onNavigateToCreate) {
+      onNavigateToCreate()
+    }
+
     handleClose()
   }
 
