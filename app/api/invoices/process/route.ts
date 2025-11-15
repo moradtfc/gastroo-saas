@@ -23,11 +23,22 @@ function normalizeOCRText(text: string): string {
   let normalized = text
 
   // Corregir símbolos de moneda confundidos por el OCR
-  normalized = normalized.replace(/[¢¤]/g, '€')  // ¢ → €
+  normalized = normalized.replace(/[¢¤©]/g, '€')  // ¢ © ¤ → €
+  normalized = normalized.replace(/(\d+[.,]\d+)\s*e\s/gi, '$1 € ')  // "0,15e " → "0,15 € "
+  normalized = normalized.replace(/(\d+[.,]\d+)e([^a-z]|$)/gi, '$1€$2')  // "0,15e" → "0,15€"
 
   // Corregir ceros confundidos con letras O
-  // Solo en contextos de números (preservar la O en palabras)
   normalized = normalized.replace(/([0-9])O([0-9])/g, '$10$2')
+
+  // Corregir precios mal escaneados: "283€" probablemente es "2.83€"
+  // Si un precio tiene 3+ dígitos enteros sin decimales, insertar punto decimal
+  normalized = normalized.replace(/(\s|^)(\d{3,})€/g, (match, space, num) => {
+    // Si es un número grande como 283, convertir a 2.83
+    if (num.length === 3 && parseInt(num) > 100) {
+      return `${space}${num.slice(0, -2)}.${num.slice(-2)}€`
+    }
+    return match
+  })
 
   return normalized
 }
@@ -269,13 +280,24 @@ function extractItems(lines: string[], currency: string): InvoiceItem[] {
     // PATRÓN 1: Productos con peso/cantidad y precio unitario
     // Ejemplo: "0,615 kg x 2,69 €/kg G 1,68 € | Eo"
     // Más flexible para tolerar ruido del OCR
-    const weightPriceMatch = line.match(/(\d+[.,]\d+)\s*(kg|g|l|ml|un)\s*x\s*(\d+[.,]\d+)\s*[€¢¤]?\s*[\/]?\s*(?:kg|g|l|ml|un)?.*?(\d+[.,]\d+)\s*[€¢¤]/i)
+    const weightPriceMatch = line.match(/(\d+[.,]\d+)\s*(kg|g|l|ml|un)\s*x\s*(\d+[.,]\d+)\s*[€¢¤©]?\s*[\/]?\s*(?:kg|g|l|ml|un)?/i)
 
     if (weightPriceMatch) {
       const quantity = parseFloat(weightPriceMatch[1].replace(',', '.'))
       const unit = weightPriceMatch[2].toLowerCase()
       const unitPrice = parseFloat(weightPriceMatch[3].replace(',', '.'))
-      const total = parseFloat(weightPriceMatch[4].replace(',', '.'))
+
+      // Buscar el precio total en la misma línea
+      const restOfLine = line.substring(line.indexOf(weightPriceMatch[0]) + weightPriceMatch[0].length)
+      const totalMatch = restOfLine.match(/(\d+[.,]\d+)\s*[€¢¤©]/i)
+
+      let total = 0
+      if (totalMatch) {
+        total = parseFloat(totalMatch[1].replace(',', '.'))
+      } else {
+        // Si no hay total explícito, calcularlo
+        total = quantity * unitPrice
+      }
 
       // Nombre del producto: todo lo que está antes del patrón de peso
       let name = line.substring(0, line.indexOf(weightPriceMatch[1]))
@@ -288,13 +310,13 @@ function extractItems(lines: string[], currency: string): InvoiceItem[] {
 
       name = cleanProductName(name)
 
-      if (name.length > 2) {
+      if (name.length > 2 && total > 0) {
         items.push({
           name,
           quantity,
           unit,
           price: unitPrice,
-          total
+          total: parseFloat(total.toFixed(2))
         })
         processedLines.add(i)
         continue
@@ -334,16 +356,16 @@ function extractItems(lines: string[], currency: string): InvoiceItem[] {
     }
 
     // PATRÓN 3: Productos simples con precio al final
-    // Ejemplo: "ATÚN CLARO ALIPENDE P6 NATI A 4.20 €" o "CHORIZO SARTA PICANTE ALIPE A 283€ 1"
-    // Más flexible: acepta € ¢ ¤, tolera espacios y caracteres extra
-    const simplePriceMatch = line.match(/(\d+[.,]\d+)\s*[€¢¤]/i)
+    // Ejemplo: "ATÚN CLARO ALIPENDE P6 NATI A 4.20 €" o "CHORIZO SARTA PICANTE ALIPE A 2.83€"
+    // Más flexible: acepta € ¢ ¤ ©, tolera espacios y caracteres extra
+    const simplePriceMatch = line.match(/(\d+[.,]\d+)\s*[€¢¤©]/i)
 
     if (simplePriceMatch && numbers.length >= 1) {
       const total = parseFloat(simplePriceMatch[1].replace(',', '.'))
 
       // Evitar líneas que son claramente totales, descuentos, o impuestos
       const upperLine = line.toUpperCase()
-      if (/TOTAL|SUBTOTAL|IVA|IMPUESTO|DESCUENTO|PROMOCION|CAMBIO|ENTREGADO|EFECTIVA/i.test(upperLine)) {
+      if (/TOTAL|SUBTOTAL|IVA|IMPUESTO|DESCUENTO|PROMOCION|CAMBIO|ENTREGADO|EFECTIVA|-\d+[.,]\d+/i.test(upperLine)) {
         continue
       }
 
@@ -352,7 +374,7 @@ function extractItems(lines: string[], currency: string): InvoiceItem[] {
       // Si el nombre es muy corto, buscar en la línea anterior
       if (name.length < 5 && i > 0 && !processedLines.has(i - 1)) {
         const prevLine = productLines[i - 1]
-        const prevHasPrice = /\d+[.,]\d+\s*[€¢¤]/i.test(prevLine)
+        const prevHasPrice = /\d+[.,]\d+\s*[€¢¤©]/i.test(prevLine)
 
         if (!prevHasPrice) {
           const prevName = cleanProductName(prevLine)
@@ -392,7 +414,7 @@ function cleanProductName(rawName: string): string {
   let name = rawName
 
   // Remover símbolos de moneda (incluyendo caracteres confundidos por OCR)
-  name = name.replace(/[€$£¢¤]/g, ' ')
+  name = name.replace(/[€$£¢¤©]/g, ' ')
 
   // Remover números con decimales (precios)
   name = name.replace(/\d+[.,]\d+/g, ' ')
@@ -401,11 +423,11 @@ function cleanProductName(rawName: string): string {
   name = name.replace(/\d+\s*(kg|g|l|ml|un|unidad|unidades)/gi, ' ')
   name = name.replace(/x\s*\d+/gi, ' ')
 
-  // Remover códigos y letras sueltas comunes del OCR
-  name = name.replace(/\s+[A-Z]{1,2}(\s+|$)/g, ' ')  // A, B, C, EA, EU, etc.
+  // Remover códigos y letras sueltas comunes del OCR (2 caracteres o menos)
+  name = name.replace(/\s+[A-Z]{1,2}(\s+|$)/gi, ' ')  // A, B, C, EA, EU, etc.
 
-  // Remover palabras cortas sin sentido (ruido del OCR)
-  name = name.replace(/\s+(Ea|Eo|Hi|EU|NA|Po|Noid|WE|Cr|oe|Fr|ko|cre)\s+/gi, ' ')
+  // Remover palabras cortas sin sentido (ruido del OCR) - más agresivo
+  name = name.replace(/\b(Ea|Eo|Hi|EU|NA|Po|Noid|WE|Cr|oe|Fr|ko|cre|Rory|Guar)\b/gi, ' ')
 
   // Remover guiones, barras y caracteres especiales
   name = name.replace(/[\-—_|]+/g, ' ')
@@ -417,6 +439,9 @@ function cleanProductName(rawName: string): string {
 
   // Limpiar comas extrañas (ej: "PA,ATA" → "PA ATA")
   name = name.replace(/,/g, ' ')
+
+  // Remover puntos sueltos
+  name = name.replace(/\s+\.\s+/g, ' ')
 
   // Remover espacios múltiples
   name = name.replace(/\s+/g, ' ').trim()
@@ -480,8 +505,8 @@ function fallbackItemExtraction(lines: string[], currency: string): InvoiceItem[
 
   // Buscar líneas que contengan al menos un precio (formato con decimales y símbolo de moneda)
   for (const line of lines) {
-    // Más flexible: acepta €, ¢, ¤
-    const priceMatch = line.match(/(\d+[.,]\d+)\s*[€¢¤]/i)
+    // Más flexible: acepta €, ¢, ¤, ©
+    const priceMatch = line.match(/(\d+[.,]\d+)\s*[€¢¤©]/i)
 
     if (priceMatch) {
       const price = parseFloat(priceMatch[1].replace(',', '.'))
@@ -491,7 +516,8 @@ function fallbackItemExtraction(lines: string[], currency: string): InvoiceItem[
       const invalidKeywords = ['SUBTOTAL', 'IMPUESTO', 'IVA', 'TAX', 'DESCUENTO', 'ENTREGADO', 'CAMBIO', 'TOTAL', 'PROMOCION', 'EFECTIVA']
       const hasInvalidKeyword = invalidKeywords.some(keyword => upperLine.includes(keyword))
 
-      if (hasInvalidKeyword) continue
+      // También filtrar líneas con números negativos (descuentos)
+      if (hasInvalidKeyword || /-\d+[.,]\d+/.test(line)) continue
 
       const name = cleanProductName(line.substring(0, line.indexOf(priceMatch[0])))
 
