@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Search, X, Trash2, ChevronDown, Calendar, Undo2, Plus } from "lucide-react"
+import { Search, X, Trash2, ChevronDown, Calendar, Undo2, Plus, RefreshCw } from "lucide-react"
 import Link from "next/link"
 import { advancedSimilarity } from "@/lib/text-similarity"
 import { CreateSupplierModal } from "@/app/(dashboard)/suppliers/create-supplier-modal"
@@ -38,6 +38,7 @@ interface PurchaseItem {
   price: number | string
   total: number
   availableUnits: Unit[]
+  originalInvoiceName?: string // Nombre original de la factura (si fue asignado desde productos sin coincidencia)
 }
 
 interface PurchaseFormProps {
@@ -68,8 +69,27 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     total: number
   }>>([])
   const [assigningItemIndex, setAssigningItemIndex] = useState<number | null>(null)
+  const [changingItemId, setChangingItemId] = useState<string | null>(null)
   const [unmatchedSupplier, setUnmatchedSupplier] = useState<string | null>(null)
   const [isCreateSupplierModalOpen, setIsCreateSupplierModalOpen] = useState(false)
+  const [isQuickCreateArticleModalOpen, setIsQuickCreateArticleModalOpen] = useState(false)
+  const [quickCreateArticleData, setQuickCreateArticleData] = useState({
+    name: "",
+    categoryId: "",
+    unitId: "",
+    costPerUnit: "",
+    currentStock: ""
+  })
+  const [categorySearch, setCategorySearch] = useState("")
+  const [unitSearch, setUnitSearch] = useState("")
+  const [foodCategories, setFoodCategories] = useState<any[]>([])
+  const [pendingArticles, setPendingArticles] = useState<Array<{
+    tempId: string
+    name: string
+    categoryId: string
+    unitId: string
+    costPerUnit: string
+  }>>([])
 
   const [formData, setFormData] = useState({
     name: "",
@@ -128,7 +148,8 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
       const promises = [
         DatabaseService.getArticles(),
         DatabaseService.getSuppliers(),
-        DatabaseService.getUnits()
+        DatabaseService.getUnits(),
+        DatabaseService.getFoodCategories()
       ]
 
       if (isEditMode && purchaseId) {
@@ -139,11 +160,13 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
       const articlesData = results[0] as Article[]
       const suppliersData = results[1] as Supplier[]
       const unitsData = results[2] as Unit[]
-      const purchaseData = results[3] as any
+      const categoriesData = results[3] as any[]
+      const purchaseData = results[4] as any
 
       setArticles(articlesData || [])
       setSuppliers(suppliersData || [])
       setUnits(unitsData || [])
+      setFoodCategories(categoriesData || [])
 
       // Load purchase data if in edit mode
       if (isEditMode && purchaseData) {
@@ -404,6 +427,36 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
   }
 
   const saveSelectedArticles = () => {
+    // Si estamos cambiando el artículo de un item existente
+    if (changingItemId !== null && selectedArticles.length === 1) {
+      const existingItem = items.find(i => i.id === changingItemId)
+      const newArticle = selectedArticles[0]
+
+      if (existingItem) {
+        const compatibleUnits = getCompatibleUnits(newArticle)
+        const defaultUnit = compatibleUnits[0]
+
+        const updatedItem: PurchaseItem = {
+          ...existingItem,
+          articleId: newArticle.id,
+          articleName: newArticle.name,
+          unit: defaultUnit?.name || 'unidad',
+          unitId: defaultUnit?.id || '',
+          unitSymbol: defaultUnit?.symbol || 'ud',
+          availableUnits: compatibleUnits
+          // Mantenemos quantity, price, total y originalInvoiceName del item existente
+        }
+
+        setItems(prev => prev.map(item => item.id === changingItemId ? updatedItem : item))
+        toast.success('Artículo cambiado correctamente')
+      }
+
+      setSelectedArticles([])
+      setIsArticleModalOpen(false)
+      setChangingItemId(null)
+      return
+    }
+
     // Si estamos asignando artículo a un item sin match
     if (assigningItemIndex !== null && selectedArticles.length === 1) {
       const unmatchedItem = unmatchedItems[assigningItemIndex]
@@ -421,7 +474,8 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
         quantity: unmatchedItem.quantity,
         price: unmatchedItem.price,
         total: unmatchedItem.total,
-        availableUnits: compatibleUnits
+        availableUnits: compatibleUnits,
+        originalInvoiceName: unmatchedItem.name // Guardar nombre original de la factura
       }
 
       setItems(prev => [...prev, newItem])
@@ -466,17 +520,35 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
 
   const handleCancelAssign = () => {
     setAssigningItemIndex(null)
+    setChangingItemId(null)
     setSelectedArticles([])
     setIsArticleModalOpen(false)
+  }
+
+  const handleChangeArticle = (itemId: string) => {
+    setChangingItemId(itemId)
+    setSelectedArticles([])
+    setIsArticleModalOpen(true)
   }
 
   const handleUndoAssignment = (itemId: string) => {
     const item = items.find(i => i.id === itemId)
     if (!item) return
 
-    // Mover el artículo de vuelta a unmatchedItems
+    // Solo permitir deshacer si tiene nombre original de la factura
+    if (!item.originalInvoiceName) {
+      toast.error('Este artículo no puede deshacerse porque no fue asignado desde productos sin coincidencia')
+      return
+    }
+
+    // Si el item tiene un articleId temporal, eliminarlo de pendingArticles
+    if (item.articleId.startsWith('pending-')) {
+      setPendingArticles(prev => prev.filter(pa => pa.tempId !== item.articleId))
+    }
+
+    // Mover el artículo de vuelta a unmatchedItems usando el nombre ORIGINAL de la factura
     const newUnmatchedItem = {
-      name: item.articleName,
+      name: item.originalInvoiceName, // Usar nombre original de la factura, NO el del artículo asignado
       quantity: typeof item.quantity === 'string' ? parseFloat(item.quantity) : item.quantity,
       unit: item.unitSymbol,
       price: typeof item.price === 'string' ? parseFloat(item.price) : item.price,
@@ -488,7 +560,111 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     toast.success('Asignación deshecha. Puedes volver a asignar el artículo.')
   }
 
+  const handleQuickCreateArticle = async () => {
+    if (!quickCreateArticleData.name.trim()) {
+      toast.error("El nombre es obligatorio")
+      return
+    }
+    if (!quickCreateArticleData.categoryId) {
+      toast.error("La categoría es obligatoria")
+      return
+    }
+    if (!quickCreateArticleData.unitId) {
+      toast.error("La unidad es obligatoria")
+      return
+    }
+    if (!quickCreateArticleData.costPerUnit || parseFloat(quickCreateArticleData.costPerUnit) <= 0) {
+      toast.error("El precio es obligatorio y debe ser mayor a 0")
+      return
+    }
+    if (!quickCreateArticleData.currentStock || parseFloat(quickCreateArticleData.currentStock) < 0) {
+      toast.error("El stock es obligatorio y no puede ser negativo")
+      return
+    }
+
+    try {
+      const selectedUnit = units.find(u => u.id === quickCreateArticleData.unitId)
+
+      // Generar ID temporal para el artículo pendiente
+      const tempId = `pending-${Date.now()}-${Math.random()}`
+
+      // Guardar artículo como pendiente de crear (se creará al guardar la compra)
+      const pendingArticle = {
+        tempId,
+        name: quickCreateArticleData.name,
+        categoryId: quickCreateArticleData.categoryId,
+        unitId: quickCreateArticleData.unitId,
+        costPerUnit: quickCreateArticleData.costPerUnit
+      }
+
+      setPendingArticles(prev => [...prev, pendingArticle])
+      toast.success("Artículo agregado (se creará al guardar la compra)")
+
+      // Si estamos creando desde un producto sin coincidencia, agregarlo a la compra con ID temporal
+      if (assigningItemIndex !== null) {
+        const unmatchedItem = unmatchedItems[assigningItemIndex]
+
+        if (unmatchedItem) {
+          const newItem: PurchaseItem = {
+            id: Date.now().toString() + Math.random(),
+            articleId: tempId, // ID temporal
+            articleName: quickCreateArticleData.name,
+            unit: selectedUnit?.name || 'unidad',
+            unitId: selectedUnit?.id || '',
+            unitSymbol: selectedUnit?.symbol || 'ud',
+            quantity: unmatchedItem.quantity,
+            price: unmatchedItem.price,
+            total: unmatchedItem.total,
+            availableUnits: selectedUnit ? [selectedUnit] : [],
+            originalInvoiceName: unmatchedItem.name
+          }
+
+          setItems(prev => [...prev, newItem])
+          setUnmatchedItems(prev => prev.filter((_, i) => i !== assigningItemIndex))
+          toast.success('Artículo agregado a la compra')
+        }
+
+        setAssigningItemIndex(null)
+      }
+
+      setIsQuickCreateArticleModalOpen(false)
+      setQuickCreateArticleData({ name: "", categoryId: "", unitId: "", costPerUnit: "", currentStock: "" })
+      setCategorySearch("")
+      setUnitSearch("")
+    } catch (error) {
+      console.error("Error agregando artículo:", error)
+      toast.error("Error al agregar artículo")
+    }
+  }
+
+  const handleRemoveUnmatchedItem = (index: number) => {
+    setUnmatchedItems(prev => prev.filter((_, i) => i !== index))
+    toast.success("Producto sin coincidencia eliminado")
+  }
+
+  const handleCreateArticleFromUnmatched = (unmatchedItem: any, index: number) => {
+    // Prellenar el formulario de creación rápida con los datos del producto sin coincidencia
+    setQuickCreateArticleData({
+      name: unmatchedItem.name,
+      categoryId: "",
+      unitId: "",
+      costPerUnit: unmatchedItem.price.toString(),
+      currentStock: unmatchedItem.quantity.toString()
+    })
+    setIsQuickCreateArticleModalOpen(true)
+
+    // Guardar el índice del item para eliminarlo después de crear el artículo si el usuario quiere
+    setAssigningItemIndex(index)
+  }
+
   const removeItem = (id: string) => {
+    const itemToRemove = items.find(item => item.id === id)
+
+    // Si el item tiene un articleId temporal, también eliminarlo de pendingArticles
+    if (itemToRemove && itemToRemove.articleId.startsWith('pending-')) {
+      setPendingArticles(prev => prev.filter(pa => pa.tempId !== itemToRemove.articleId))
+    }
+
     setItems(items.filter(item => item.id !== id))
   }
 
@@ -532,6 +708,15 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
 
   const filteredArticles = articles.filter(article =>
     article.name.toLowerCase().includes(searchArticle.toLowerCase())
+  )
+
+  const filteredCategoriesForQuickCreate = foodCategories.filter(cat =>
+    cat.name.toLowerCase().includes(categorySearch.toLowerCase())
+  )
+
+  const filteredUnitsForQuickCreate = units.filter(unit =>
+    unit.name.toLowerCase().includes(unitSearch.toLowerCase()) ||
+    unit.symbol.toLowerCase().includes(unitSearch.toLowerCase())
   )
 
   const totalAmount = items.reduce((sum, item) => sum + item.total, 0)
@@ -593,6 +778,44 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     try {
       setLoading(true)
 
+      // Crear artículos pendientes primero
+      const tempIdToRealIdMap: Record<string, string> = {}
+
+      if (pendingArticles.length > 0) {
+        for (const pendingArticle of pendingArticles) {
+          const selectedCategory = foodCategories.find(c => c.id === pendingArticle.categoryId)
+          const selectedUnit = units.find(u => u.id === pendingArticle.unitId)
+
+          const articleData: any = {
+            name: pendingArticle.name,
+            food_category_id: pendingArticle.categoryId,
+            unit_id: pendingArticle.unitId,
+            default_unit_id: pendingArticle.unitId,
+            cost_per_unit: parseFloat(pendingArticle.costPerUnit),
+            current_stock: 0, // Se creará con stock 0, se actualizará con la compra
+            category: selectedCategory?.name || undefined,
+            unit: selectedUnit?.symbol || selectedUnit?.name || undefined
+          }
+
+          const createdArticle = await DatabaseService.createIngredient(articleData)
+          tempIdToRealIdMap[pendingArticle.tempId] = createdArticle.id
+        }
+
+        // Limpiar artículos pendientes después de crearlos
+        setPendingArticles([])
+      }
+
+      // Reemplazar IDs temporales por IDs reales en los items
+      const processedItems = items.map(item => {
+        if (item.articleId.startsWith('pending-')) {
+          const realId = tempIdToRealIdMap[item.articleId]
+          if (realId) {
+            return { ...item, articleId: realId }
+          }
+        }
+        return item
+      })
+
       const purchaseData = {
         name: formData.name.trim(),
         description: formData.description.trim() || undefined,
@@ -600,7 +823,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
         purchase_date: formData.purchaseDate,
         total_amount: totalAmount,
         status: formData.status,
-        items: items.map(item => ({
+        items: processedItems.map(item => ({
           article_id: item.articleId,
           quantity: typeof item.quantity === 'string' ? parseFloat(item.quantity) : item.quantity,
           unit: item.unitId,
@@ -632,7 +855,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
           .eq('purchase_id', purchaseId)
 
         // Create new items
-        const purchaseItems = items.map(item => ({
+        const purchaseItems = processedItems.map(item => ({
           purchase_id: purchaseId,
           article_id: item.articleId,
           quantity: typeof item.quantity === 'string' ? parseFloat(item.quantity) : item.quantity,
@@ -653,7 +876,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
         const purchase = await DatabaseService.createPurchase(purchaseData)
 
         // Actualizar stock de artículos
-        for (const item of items) {
+        for (const item of processedItems) {
           await updateArticleStock(item)
         }
 
@@ -721,6 +944,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
       const prc = typeof item.price === 'string' ? parseFloat(item.price) : item.price
       return qty > 0 && prc > 0
     }) &&
+    unmatchedItems.length === 0 && // No permitir guardar si hay productos sin coincidencia
     hasChanges()
   )
 
@@ -745,10 +969,16 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="text-xl">
-              {assigningItemIndex !== null ? 'Asignar Artículo' : 'Añadir Artículos'}
+              {changingItemId !== null
+                ? 'Cambiar Artículo'
+                : assigningItemIndex !== null
+                ? 'Asignar Artículo'
+                : 'Añadir Artículos'}
             </DialogTitle>
             <p className="text-sm text-gray-600 mt-1">
-              {assigningItemIndex !== null
+              {changingItemId !== null
+                ? 'Selecciona un artículo diferente (se mantendrán cantidad y precio)'
+                : assigningItemIndex !== null
                 ? `Selecciona un artículo para: ${unmatchedItems[assigningItemIndex]?.name}`
                 : 'Busca y añade artículos de tu inventario'}
             </p>
@@ -834,7 +1064,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
           </div>
 
           <DialogFooter className="border-t pt-4 mt-4 flex gap-2">
-            {assigningItemIndex !== null && (
+            {(assigningItemIndex !== null || changingItemId !== null) && (
               <Button
                 variant="outline"
                 onClick={handleCancelAssign}
@@ -846,13 +1076,17 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
             <Button
               onClick={saveSelectedArticles}
               disabled={
-                assigningItemIndex !== null
+                (assigningItemIndex !== null || changingItemId !== null)
                   ? selectedArticles.length !== 1
                   : selectedArticles.length === 0
               }
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
             >
-              {assigningItemIndex !== null
+              {changingItemId !== null
+                ? selectedArticles.length === 1
+                  ? 'Cambiar artículo'
+                  : 'Selecciona 1 artículo'
+                : assigningItemIndex !== null
                 ? selectedArticles.length === 1
                   ? 'Asignar artículo'
                   : 'Selecciona 1 artículo'
@@ -1046,22 +1280,21 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-xl font-semibold">Proveedores</h2>
                 <div className="flex gap-2">
-                  <Button
+                  <button
                     type="button"
-                    variant="outline"
-                    className="bg-gray-100 hover:bg-gray-200 border border-gray-300"
+                    className="px-5 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-semibold transition-colors cursor-pointer"
                     onClick={() => setIsSupplierModalOpen(true)}
                   >
                     Asignar
-                  </Button>
-                  <Button
+                  </button>
+                  <button
                     type="button"
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors cursor-pointer flex items-center gap-2"
                     onClick={() => setIsCreateSupplierModalOpen(true)}
                   >
-                    <Plus size={16} className="mr-2" />
+                    <Plus size={16} />
                     Crear proveedor
-                  </Button>
+                  </button>
                 </div>
               </div>
 
@@ -1156,12 +1389,21 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                   <h2 className="text-xl font-semibold">Artículos</h2>
                   <p className="text-sm text-gray-600 mt-1">Añade los artículos de la compra con sus cantidades y costos</p>
                 </div>
-                <button
-                  onClick={() => setIsArticleModalOpen(true)}
-                  className="px-5 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-semibold transition-colors cursor-pointer"
-                >
-                  Añadir artículos
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setIsArticleModalOpen(true)}
+                    className="px-5 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-semibold transition-colors cursor-pointer"
+                  >
+                    Añadir artículos
+                  </button>
+                  <button
+                    onClick={() => setIsQuickCreateArticleModalOpen(true)}
+                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors cursor-pointer flex items-center gap-2"
+                  >
+                    <Plus size={16} />
+                    Crear artículo
+                  </button>
+                </div>
               </div>
 
               {/* Productos sin match (requieren asignación manual) */}
@@ -1184,16 +1426,32 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex-1">
                           <h4 className="font-semibold text-gray-900 mb-1">{item.name}</h4>
-                          <p className="text-sm text-gray-600">
+                          <p className="text-sm text-gray-600 mb-3">
                             {item.quantity} {item.unit} • €{item.price.toFixed(2)} c/u • Total: €{item.total.toFixed(2)}
                           </p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleCreateArticleFromUnmatched(item, index)}
+                              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-1.5"
+                            >
+                              <Plus size={14} />
+                              Crear artículo
+                            </button>
+                            <button
+                              onClick={() => handleAssignArticle(index)}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-1.5"
+                            >
+                              <Search size={14} />
+                              Asignar artículo
+                            </button>
+                          </div>
                         </div>
                         <button
-                          onClick={() => handleAssignArticle(index)}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-2"
+                          onClick={() => handleRemoveUnmatchedItem(index)}
+                          className="text-red-600 hover:text-red-700 p-2 hover:bg-red-100 rounded-lg transition-colors"
+                          title="Eliminar producto sin coincidencia"
                         >
-                          <Search size={16} />
-                          Asignar artículo
+                          <Trash2 size={18} />
                         </button>
                       </div>
                     </div>
@@ -1242,16 +1500,25 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                       className="p-4 border border-gray-200 rounded-lg bg-white hover:border-gray-300 transition-colors"
                     >
                       <div className="flex items-center gap-3 mb-3">
-                        <div className="flex-1">
+                        <div className="flex-1 flex items-center gap-2">
                           <span className="font-semibold text-gray-900 block">{item.articleName}</span>
+                          <button
+                            onClick={() => handleChangeArticle(item.id)}
+                            className="text-blue-600 hover:text-blue-700 p-1.5 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            title="Cambiar producto"
+                          >
+                            <RefreshCw size={16} />
+                          </button>
                         </div>
-                        <button
-                          onClick={() => handleUndoAssignment(item.id)}
-                          className="text-orange-600 hover:text-orange-700 p-2 hover:bg-orange-50 rounded-lg transition-colors cursor-pointer"
-                          title="Deshacer asignación"
-                        >
-                          <Undo2 size={18} />
-                        </button>
+                        {item.originalInvoiceName && (
+                          <button
+                            onClick={() => handleUndoAssignment(item.id)}
+                            className="text-orange-600 hover:text-orange-700 p-2 hover:bg-orange-50 rounded-lg transition-colors cursor-pointer"
+                            title="Deshacer asignación"
+                          >
+                            <Undo2 size={18} />
+                          </button>
+                        )}
                         <button
                           onClick={() => removeItem(item.id)}
                           className="text-red-600 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
@@ -1426,6 +1693,170 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
           </div>
         </div>
       </div>
+
+      {/* Modal de creación de artículo rápidamente */}
+      <Dialog open={isQuickCreateArticleModalOpen} onOpenChange={setIsQuickCreateArticleModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl">Crear artículo rápidamente</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Nombre */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Nombre del artículo <span className="text-red-500">*</span>
+              </label>
+              <Input
+                placeholder="Ej: Tomate cherry"
+                value={quickCreateArticleData.name}
+                onChange={(e) => setQuickCreateArticleData(prev => ({ ...prev, name: e.target.value }))}
+              />
+            </div>
+
+            {/* Categoría */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Categoría <span className="text-red-500">*</span>
+              </label>
+              <Input
+                placeholder="Buscar categoría..."
+                value={categorySearch}
+                onChange={(e) => setCategorySearch(e.target.value)}
+                className="mb-2"
+              />
+              <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
+                {categorySearch === "" || filteredCategoriesForQuickCreate.length > 0 ? (
+                  (categorySearch === "" ? foodCategories : filteredCategoriesForQuickCreate).map((cat) => (
+                    <div
+                      key={cat.id}
+                      onClick={() => {
+                        setQuickCreateArticleData(prev => ({ ...prev, categoryId: cat.id }))
+                        setCategorySearch("")
+                      }}
+                      className={cn(
+                        "px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors flex items-center gap-2",
+                        quickCreateArticleData.categoryId === cat.id && "bg-blue-50 border-l-4 border-blue-600"
+                      )}
+                    >
+                      <span>{cat.icon || "📁"}</span>
+                      <span className="text-gray-900">{cat.name}</span>
+                      {quickCreateArticleData.categoryId === cat.id && (
+                        <span className="ml-auto text-blue-600">✓</span>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="px-4 py-3 text-gray-500 text-sm">No se encontraron categorías</div>
+                )}
+              </div>
+            </div>
+
+            {/* Unidad */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Unidad <span className="text-red-500">*</span>
+              </label>
+              <Input
+                placeholder="Buscar unidad..."
+                value={unitSearch}
+                onChange={(e) => setUnitSearch(e.target.value)}
+                className="mb-2"
+              />
+              <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
+                {unitSearch === "" || filteredUnitsForQuickCreate.length > 0 ? (
+                  (unitSearch === "" ? units : filteredUnitsForQuickCreate).map((unit) => (
+                    <div
+                      key={unit.id}
+                      onClick={() => {
+                        setQuickCreateArticleData(prev => ({ ...prev, unitId: unit.id }))
+                        setUnitSearch("")
+                      }}
+                      className={cn(
+                        "px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors",
+                        quickCreateArticleData.unitId === unit.id && "bg-blue-50 border-l-4 border-blue-600"
+                      )}
+                    >
+                      <span className="text-gray-900">{unit.name}</span>
+                      <span className="text-gray-500 text-sm ml-2">({unit.symbol})</span>
+                      {quickCreateArticleData.unitId === unit.id && (
+                        <span className="ml-2 text-blue-600">✓</span>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="px-4 py-3 text-gray-500 text-sm">No se encontraron unidades</div>
+                )}
+              </div>
+            </div>
+
+            {/* Precio y Stock en una fila */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Precio (€) <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={quickCreateArticleData.costPerUnit}
+                  onChange={(e) => {
+                    const sanitized = e.target.value.replace(/[^0-9.]/g, '')
+                    setQuickCreateArticleData(prev => ({ ...prev, costPerUnit: sanitized }))
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Stock actual <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={quickCreateArticleData.unitId
+                      ? `Ej: 10 ${units.find(u => u.id === quickCreateArticleData.unitId)?.symbol || ''}`
+                      : "0"
+                    }
+                    value={quickCreateArticleData.currentStock}
+                    onChange={(e) => {
+                      const sanitized = e.target.value.replace(/[^0-9.]/g, '')
+                      setQuickCreateArticleData(prev => ({ ...prev, currentStock: sanitized }))
+                    }}
+                  />
+                  {quickCreateArticleData.unitId && quickCreateArticleData.currentStock && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">
+                      {units.find(u => u.id === quickCreateArticleData.unitId)?.symbol}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-6">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsQuickCreateArticleModalOpen(false)
+                setQuickCreateArticleData({ name: "", categoryId: "", unitId: "", costPerUnit: "", currentStock: "" })
+                setCategorySearch("")
+                setUnitSearch("")
+              }}
+              className="cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleQuickCreateArticle}
+              className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+            >
+              Crear artículo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Modal de creación de proveedor */}
       <CreateSupplierModal
