@@ -274,6 +274,9 @@ function looksLikeProductName(line: string): boolean {
   if (/^[\-=_\s]+$/.test(cleaned)) return false
   if (/^(DESCRIPCION|PRODUCTO|CANTIDAD|PRECIO|TOTAL|SUBTOTAL)/i.test(cleaned)) return false
 
+  // Contiene palabras clave de resumen/total (en cualquier posición)
+  if (/\b(TOTAL|SUBTOTAL|IMPORTE|IVA|BASE\s+IMPONIBLE)\b/i.test(cleaned)) return false
+
   // Es información de la tienda o footer
   if (/^(GEMINIS|MADRID|AHORRAMAS|CAJA|TICKET|TÍCUE|GRACIAS|TELEFONO|ATENCION|CLIENTE|WEB|NUMERO|ARTICULOS|FACTURA|SIMPLIFICARA|CAMBIO|ENTREGADO|EFECTIVA)/i.test(cleaned)) return false
 
@@ -291,18 +294,22 @@ function extractItems(lines: string[], currency: string): InvoiceItem[] {
   const items: InvoiceItem[] = []
 
   // Buscar el índice donde termina la lista de productos
+  // Detectamos TOTAL o SUBTOTAL como indicadores de fin de productos
   let totalIndex = -1
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    if (/SUBTOTAL/i.test(line)) continue
+    const upperLine = line.toUpperCase()
 
-    if (/\bTOTAL\b/i.test(line)) {
+    // Detectar SUBTOTAL o TOTAL (ambos indican fin de lista de productos)
+    if (/\b(SUBTOTAL|TOTAL)\b/i.test(line)) {
+      // Verificar que la línea contenga números (para evitar falsos positivos)
       const numbers = line.match(/\d+[.,]\d+/g)
       if (numbers && numbers.length > 0) {
+        // Si hay un número mayor a 1€, es muy probable que sea el final
         const maxNum = Math.max(...numbers.map(n => parseFloat(n.replace(',', '.'))))
-        if (maxNum >= 10) {
+        if (maxNum >= 1) {
           totalIndex = i
-          console.log(`\n🛑 TOTAL detectado en línea ${i + 1}: "${line.trim()}"`)
+          console.log(`\n🛑 Fin de productos detectado en línea ${i + 1}: "${line.trim()}"`)
           break
         }
       }
@@ -422,9 +429,15 @@ function extractItems(lines: string[], currency: string): InvoiceItem[] {
     const simplePriceMatch = line.match(/(\d+[.,]\d+)\s*[€¢¤©]/i)
 
     if (simplePriceMatch) {
-      // Evitar líneas que no son productos
+      // Evitar líneas que no son productos (líneas de resumen, totales, impuestos, etc.)
       const upperLine = line.toUpperCase()
-      if (/TOTAL|SUBTOTAL|IVA|IMPUESTO|DESCUENTO|PROMOCION|CAMBIO|ENTREGADO|EFECTIVA|-\d+[.,]\d+/i.test(upperLine)) {
+      if (/\b(TOTAL|SUBTOTAL|IVA|IMPUESTO|IMPORTE|BASE\s+IMPONIBLE|DESCUENTO|PROMOCION|CAMBIO|ENTREGADO|EFECTIVA|PAGAR|A\s+PAGAR)\b/i.test(upperLine)) {
+        console.log(`⏭️  Saltando línea de resumen: "${line.trim()}"`)
+        continue
+      }
+
+      // Evitar números negativos (descuentos)
+      if (/-\d+[.,]\d+/.test(line)) {
         continue
       }
 
