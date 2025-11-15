@@ -577,6 +577,13 @@ export default function PurchasesPage() {
             Subir factura
           </button>
 
+          <Link href="/purchases/process-invoice">
+            <button className="px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg font-medium transition-colors shadow-sm cursor-pointer whitespace-nowrap flex items-center gap-2">
+              <Sparkles size={18} />
+              Procesar Factura (OCR)
+            </button>
+          </Link>
+
           <Link href="/purchases/create">
             <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm cursor-pointer whitespace-nowrap">
               <Plus className="inline-block mr-2" size={18} />
