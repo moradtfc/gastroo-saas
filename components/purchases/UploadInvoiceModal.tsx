@@ -3,8 +3,7 @@
 import React, { useState, useCallback, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Upload, X, FileText, Loader2, Check, Edit2, CheckCircle, AlertTriangle, XCircle } from "lucide-react"
+import { Upload, Loader2, Check } from "lucide-react"
 import { toast } from "sonner"
 import Image from "next/image"
 import { DatabaseService } from "@/lib/database"
@@ -57,15 +56,11 @@ interface UploadInvoiceModalProps {
 }
 
 export function UploadInvoiceModal({ isOpen, onClose, onSuccess, onNavigateToCreate }: UploadInvoiceModalProps) {
-  const [step, setStep] = useState<'upload' | 'processing' | 'review'>('upload')
+  const [step, setStep] = useState<'upload' | 'processing'>('upload')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [processing, setProcessing] = useState(false)
-  const [invoiceData, setInvoiceData] = useState<InvoiceData | null>(null)
-  const [purchaseName, setPurchaseName] = useState("")
-  const [status, setStatus] = useState("paid")
   const [articles, setArticles] = useState<Article[]>([])
-  const [itemMatches, setItemMatches] = useState<ItemMatch[]>([])
 
   // Cargar artículos del inventario cuando se abre el modal
   useEffect(() => {
@@ -161,142 +156,53 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess, onNavigateToCre
         }))
       }
 
-      setInvoiceData(formattedData)
-
       // Hacer matching automático de productos
       const matches = performMatching(formattedData.items)
-      setItemMatches(matches)
 
-      setStep('review')
+      // Guardar datos en sessionStorage inmediatamente
+      const invoiceSessionData = {
+        supplier: formattedData.supplier,
+        date: formattedData.date,
+        purchaseName: `Compra - ${formattedData.supplier} - ${new Date(formattedData.date).toLocaleDateString('es-ES')}`,
+        status: 'paid',
+        currency: formattedData.currency,
+        subtotal: formattedData.subtotal,
+        items: formattedData.items.map((item: InvoiceItem, index: number) => ({
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+          price: item.price,
+          total: item.total,
+          matchedArticleId: matches[index]?.selectedArticleId || null,
+          matchScore: matches[index]?.matchScore || 0
+        }))
+      }
+
+      sessionStorage.setItem('invoiceData', JSON.stringify(invoiceSessionData))
+
       toast.success("Factura procesada exitosamente")
+
+      // Navegar a create
+      if (onNavigateToCreate) {
+        onNavigateToCreate()
+      }
+
+      // Cerrar modal
+      handleClose()
     } catch (error: any) {
       console.error('Error processing invoice:', error)
       toast.error(error.message || "Error al procesar la factura")
       setStep('upload')
-    } finally {
       setProcessing(false)
     }
-  }
-
-  const handleSubmit = () => {
-    if (!invoiceData) return
-
-    if (!purchaseName.trim()) {
-      toast.error("El nombre de la compra es obligatorio")
-      return
-    }
-
-    // Guardar datos en sessionStorage para pasarlos a la página create
-    const invoiceSessionData = {
-      supplier: invoiceData.supplier,
-      date: invoiceData.date,
-      purchaseName: purchaseName.trim(),
-      status: status,
-      currency: invoiceData.currency,
-      subtotal: invoiceData.subtotal,
-      items: invoiceData.items.map((item, index) => ({
-        name: item.name,
-        quantity: item.quantity,
-        unit: item.unit,
-        price: item.price,
-        total: item.total,
-        matchedArticleId: itemMatches[index]?.selectedArticleId || null,
-        matchScore: itemMatches[index]?.matchScore || 0
-      }))
-    }
-
-    sessionStorage.setItem('invoiceData', JSON.stringify(invoiceSessionData))
-
-    // Navegar a create
-    if (onNavigateToCreate) {
-      onNavigateToCreate()
-    }
-
-    handleClose()
   }
 
   const handleClose = () => {
     setStep('upload')
     setSelectedFile(null)
     setPreviewUrl(null)
-    setInvoiceData(null)
-    setPurchaseName("")
-    setStatus("paid")
-    setItemMatches([])
+    setProcessing(false)
     onClose()
-  }
-
-  const updateItemMatch = (index: number, articleId: string) => {
-    const newMatches = [...itemMatches]
-    const selectedArticle = articles.find(a => a.id === articleId)
-
-    if (selectedArticle) {
-      newMatches[index] = {
-        ...newMatches[index],
-        selectedArticleId: articleId,
-        matchScore: productMatchingScore(invoiceData?.items[index]?.name || '', selectedArticle.name)
-      }
-      setItemMatches(newMatches)
-    }
-  }
-
-  const getMatchIndicator = (score: number) => {
-    if (score >= 0.7) {
-      return {
-        icon: <CheckCircle className="text-green-600" size={20} />,
-        color: 'text-green-600',
-        label: 'Excelente coincidencia',
-        bgColor: 'bg-green-50',
-        borderColor: 'border-green-200'
-      }
-    } else if (score >= 0.4) {
-      return {
-        icon: <AlertTriangle className="text-yellow-600" size={20} />,
-        color: 'text-yellow-600',
-        label: 'Posible coincidencia',
-        bgColor: 'bg-yellow-50',
-        borderColor: 'border-yellow-200'
-      }
-    } else {
-      return {
-        icon: <XCircle className="text-red-600" size={20} />,
-        color: 'text-red-600',
-        label: 'Sin coincidencia',
-        bgColor: 'bg-red-50',
-        borderColor: 'border-red-200'
-      }
-    }
-  }
-
-  const updateItem = (index: number, field: keyof InvoiceItem, value: any) => {
-    if (!invoiceData) return
-    const newItems = [...invoiceData.items]
-    newItems[index] = { ...newItems[index], [field]: value }
-
-    // Recalcular total del item
-    if (field === 'quantity' || field === 'price') {
-      newItems[index].total = newItems[index].quantity * newItems[index].price
-    }
-
-    // Recalcular subtotal
-    const newSubtotal = newItems.reduce((sum, item) => sum + item.total, 0)
-
-    setInvoiceData({
-      ...invoiceData,
-      items: newItems,
-      subtotal: newSubtotal
-    })
-  }
-
-  const removeItem = (index: number) => {
-    if (!invoiceData) return
-    const newItems = invoiceData.items.filter((_, i) => i !== index)
-    const newSubtotal = newItems.reduce((sum, item) => sum + item.total, 0)
-    setInvoiceData({
-      ...invoiceData,
-      items: newItems,
-      subtotal: newSubtotal
-    })
   }
 
   return (
@@ -395,196 +301,8 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess, onNavigateToCre
             <Loader2 className="h-16 w-16 text-blue-600 animate-spin mb-4" />
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Procesando factura...</h3>
             <p className="text-sm text-gray-600 text-center max-w-md">
-              Estamos analizando tu factura con inteligencia artificial. Esto puede tomar unos segundos.
+              Estamos analizando tu factura. Serás redirigido automáticamente a la página de creación de compra.
             </p>
-          </div>
-        )}
-
-        {step === 'review' && invoiceData && (
-          <div className="flex-1 overflow-y-auto">
-            <div className="space-y-6">
-              <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                <p className="text-sm text-gray-700">
-                  ✅ <strong>Factura procesada exitosamente.</strong> Revisa y edita los datos si es necesario.
-                </p>
-              </div>
-
-              {/* Información Básica */}
-              <div className="space-y-4">
-                <h3 className="font-semibold text-gray-900">Información de la Factura</h3>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">Proveedor</label>
-                    <Input
-                      value={invoiceData.supplier}
-                      onChange={(e) => setInvoiceData({ ...invoiceData, supplier: e.target.value })}
-                      className="w-full"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">Fecha</label>
-                    <Input
-                      type="date"
-                      value={invoiceData.date}
-                      onChange={(e) => setInvoiceData({ ...invoiceData, date: e.target.value })}
-                      className="w-full"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Artículos */}
-              <div className="space-y-4">
-                <h3 className="font-semibold text-gray-900">Artículos ({invoiceData.items.length})</h3>
-
-                <div className="space-y-3">
-                  {invoiceData.items.map((item, index) => {
-                    const match = itemMatches[index]
-                    const indicator = match ? getMatchIndicator(match.matchScore) : getMatchIndicator(0)
-                    const selectedArticle = match?.selectedArticleId
-                      ? articles.find(a => a.id === match.selectedArticleId)
-                      : null
-
-                    return (
-                      <div key={index} className={`p-4 border rounded-lg ${indicator.bgColor} ${indicator.borderColor}`}>
-                        {/* Producto detectado */}
-                        <div className="mb-3 flex items-start gap-2">
-                          {indicator.icon}
-                          <div className="flex-1">
-                            <div className="font-medium text-gray-900">{item.name}</div>
-                            <div className="text-sm text-gray-600">
-                              {item.quantity} {item.unit} • {invoiceData.currency}{item.price.toFixed(2)} • Total: {invoiceData.currency}{item.total.toFixed(2)}
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => removeItem(index)}
-                            className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-
-                        {/* Selector de artículo del inventario */}
-                        <div className="space-y-2">
-                          <label className="block text-xs font-semibold text-gray-700">
-                            Artículo en inventario {match?.selectedArticleId ? '' : '(Obligatorio)'}
-                          </label>
-                          <select
-                            value={match?.selectedArticleId || ''}
-                            onChange={(e) => updateItemMatch(index, e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                          >
-                            <option value="">Seleccionar artículo...</option>
-                            {match?.suggestedArticles.map(({ article, score }) => (
-                              <option key={article.id} value={article.id}>
-                                {article.name} ({Math.round(score * 100)}% coincidencia)
-                              </option>
-                            ))}
-                            <option disabled>──────────</option>
-                            {articles
-                              .filter(a => !match?.suggestedArticles.some(s => s.article.id === a.id))
-                              .map(article => (
-                                <option key={article.id} value={article.id}>
-                                  {article.name}
-                                </option>
-                              ))}
-                          </select>
-
-                          {selectedArticle && (
-                            <div className="text-xs text-gray-600 bg-white p-2 rounded border border-gray-200">
-                              Stock actual: {selectedArticle.current_stock} {selectedArticle.units?.abbreviation || selectedArticle.units?.name || 'uds'}
-                              {' • '}
-                              Costo: {invoiceData.currency}{selectedArticle.cost_per_unit?.toFixed(2) || '0.00'}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Editar datos del item */}
-                        <div className="grid grid-cols-3 gap-2 mt-3">
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Cantidad</label>
-                            <Input
-                              type="number"
-                              step="0.001"
-                              value={item.quantity}
-                              onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
-                              className="w-full"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Precio Unit.</label>
-                            <Input
-                              type="number"
-                              step="0.01"
-                              value={item.price}
-                              onChange={(e) => updateItem(index, 'price', parseFloat(e.target.value) || 0)}
-                              className="w-full"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Total</label>
-                            <div className="px-3 py-2 bg-gray-200 rounded-lg text-sm font-semibold text-center">
-                              {invoiceData.currency}{item.total.toFixed(2)}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                <div className="flex justify-between items-center p-4 bg-blue-50 rounded-lg border border-blue-200">
-                  <span className="font-semibold text-gray-900">Subtotal:</span>
-                  <span className="text-xl font-bold text-blue-700">
-                    {invoiceData.currency}{invoiceData.subtotal.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Datos Adicionales */}
-              <div className="space-y-4">
-                <h3 className="font-semibold text-gray-900">Datos de la Compra</h3>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">
-                      Nombre de la Compra <span className="text-red-500">*</span>
-                    </label>
-                    <Input
-                      value={purchaseName}
-                      onChange={(e) => setPurchaseName(e.target.value)}
-                      placeholder="Ej: Compra mensual de ingredientes"
-                      className="w-full"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">Estado</label>
-                    <select
-                      value={status}
-                      onChange={(e) => setStatus(e.target.value)}
-                      className="w-full h-10 px-3 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="paid">Pagado</option>
-                      <option value="unpaid">Por Pagar</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6 pt-4 border-t">
-              <Button variant="outline" onClick={() => setStep('upload')} className="flex-1">
-                Volver
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={!purchaseName.trim()}
-                className="flex-1 bg-blue-600 hover:bg-blue-700"
-              >
-                Crear Compra
-              </Button>
-            </div>
           </div>
         )}
       </DialogContent>
