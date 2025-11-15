@@ -83,6 +83,13 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
   const [categorySearch, setCategorySearch] = useState("")
   const [unitSearch, setUnitSearch] = useState("")
   const [foodCategories, setFoodCategories] = useState<any[]>([])
+  const [pendingArticles, setPendingArticles] = useState<Array<{
+    tempId: string
+    name: string
+    categoryId: string
+    unitId: string
+    costPerUnit: string
+  }>>([])
 
   const [formData, setFormData] = useState({
     name: "",
@@ -534,6 +541,11 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
       return
     }
 
+    // Si el item tiene un articleId temporal, eliminarlo de pendingArticles
+    if (item.articleId.startsWith('pending-')) {
+      setPendingArticles(prev => prev.filter(pa => pa.tempId !== item.articleId))
+    }
+
     // Mover el artículo de vuelta a unmatchedItems usando el nombre ORIGINAL de la factura
     const newUnmatchedItem = {
       name: item.originalInvoiceName, // Usar nombre original de la factura, NO el del artículo asignado
@@ -571,48 +583,39 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     }
 
     try {
-      const selectedCategory = foodCategories.find(c => c.id === quickCreateArticleData.categoryId)
       const selectedUnit = units.find(u => u.id === quickCreateArticleData.unitId)
 
-      const articleData: any = {
+      // Generar ID temporal para el artículo pendiente
+      const tempId = `pending-${Date.now()}-${Math.random()}`
+
+      // Guardar artículo como pendiente de crear (se creará al guardar la compra)
+      const pendingArticle = {
+        tempId,
         name: quickCreateArticleData.name,
-        food_category_id: quickCreateArticleData.categoryId,
-        unit_id: quickCreateArticleData.unitId,
-        default_unit_id: quickCreateArticleData.unitId,
-        cost_per_unit: parseFloat(quickCreateArticleData.costPerUnit),
-        current_stock: 0, // Se crea con stock 0, el inventario se actualizará al guardar la compra
-        category: selectedCategory?.name || undefined,
-        unit: selectedUnit?.symbol || selectedUnit?.name || undefined
+        categoryId: quickCreateArticleData.categoryId,
+        unitId: quickCreateArticleData.unitId,
+        costPerUnit: quickCreateArticleData.costPerUnit
       }
 
-      await DatabaseService.createIngredient(articleData)
-      toast.success("Artículo creado exitosamente")
+      setPendingArticles(prev => [...prev, pendingArticle])
+      toast.success("Artículo agregado (se creará al guardar la compra)")
 
-      // Recargar artículos
-      const articlesData = await DatabaseService.getArticles()
-      setArticles(articlesData || [])
-
-      // Si estamos creando desde un producto sin coincidencia, agregarlo a la compra
+      // Si estamos creando desde un producto sin coincidencia, agregarlo a la compra con ID temporal
       if (assigningItemIndex !== null) {
         const unmatchedItem = unmatchedItems[assigningItemIndex]
-        // Buscar el artículo recién creado por nombre
-        const newArticle = articlesData?.find(a => a.name === quickCreateArticleData.name)
 
-        if (newArticle && unmatchedItem) {
-          const compatibleUnits = getCompatibleUnits(newArticle)
-          const defaultUnit = compatibleUnits[0]
-
+        if (unmatchedItem) {
           const newItem: PurchaseItem = {
             id: Date.now().toString() + Math.random(),
-            articleId: newArticle.id,
-            articleName: newArticle.name,
-            unit: defaultUnit?.name || 'unidad',
-            unitId: defaultUnit?.id || '',
-            unitSymbol: defaultUnit?.symbol || 'ud',
+            articleId: tempId, // ID temporal
+            articleName: quickCreateArticleData.name,
+            unit: selectedUnit?.name || 'unidad',
+            unitId: selectedUnit?.id || '',
+            unitSymbol: selectedUnit?.symbol || 'ud',
             quantity: unmatchedItem.quantity,
             price: unmatchedItem.price,
             total: unmatchedItem.total,
-            availableUnits: compatibleUnits,
+            availableUnits: selectedUnit ? [selectedUnit] : [],
             originalInvoiceName: unmatchedItem.name
           }
 
@@ -629,8 +632,8 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
       setCategorySearch("")
       setUnitSearch("")
     } catch (error) {
-      console.error("Error creando artículo:", error)
-      toast.error("Error al crear artículo")
+      console.error("Error agregando artículo:", error)
+      toast.error("Error al agregar artículo")
     }
   }
 
@@ -655,6 +658,13 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
   }
 
   const removeItem = (id: string) => {
+    const itemToRemove = items.find(item => item.id === id)
+
+    // Si el item tiene un articleId temporal, también eliminarlo de pendingArticles
+    if (itemToRemove && itemToRemove.articleId.startsWith('pending-')) {
+      setPendingArticles(prev => prev.filter(pa => pa.tempId !== itemToRemove.articleId))
+    }
+
     setItems(items.filter(item => item.id !== id))
   }
 
@@ -768,6 +778,44 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     try {
       setLoading(true)
 
+      // Crear artículos pendientes primero
+      const tempIdToRealIdMap: Record<string, string> = {}
+
+      if (pendingArticles.length > 0) {
+        for (const pendingArticle of pendingArticles) {
+          const selectedCategory = foodCategories.find(c => c.id === pendingArticle.categoryId)
+          const selectedUnit = units.find(u => u.id === pendingArticle.unitId)
+
+          const articleData: any = {
+            name: pendingArticle.name,
+            food_category_id: pendingArticle.categoryId,
+            unit_id: pendingArticle.unitId,
+            default_unit_id: pendingArticle.unitId,
+            cost_per_unit: parseFloat(pendingArticle.costPerUnit),
+            current_stock: 0, // Se creará con stock 0, se actualizará con la compra
+            category: selectedCategory?.name || undefined,
+            unit: selectedUnit?.symbol || selectedUnit?.name || undefined
+          }
+
+          const createdArticle = await DatabaseService.createIngredient(articleData)
+          tempIdToRealIdMap[pendingArticle.tempId] = createdArticle.id
+        }
+
+        // Limpiar artículos pendientes después de crearlos
+        setPendingArticles([])
+      }
+
+      // Reemplazar IDs temporales por IDs reales en los items
+      const processedItems = items.map(item => {
+        if (item.articleId.startsWith('pending-')) {
+          const realId = tempIdToRealIdMap[item.articleId]
+          if (realId) {
+            return { ...item, articleId: realId }
+          }
+        }
+        return item
+      })
+
       const purchaseData = {
         name: formData.name.trim(),
         description: formData.description.trim() || undefined,
@@ -775,7 +823,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
         purchase_date: formData.purchaseDate,
         total_amount: totalAmount,
         status: formData.status,
-        items: items.map(item => ({
+        items: processedItems.map(item => ({
           article_id: item.articleId,
           quantity: typeof item.quantity === 'string' ? parseFloat(item.quantity) : item.quantity,
           unit: item.unitId,
@@ -807,7 +855,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
           .eq('purchase_id', purchaseId)
 
         // Create new items
-        const purchaseItems = items.map(item => ({
+        const purchaseItems = processedItems.map(item => ({
           purchase_id: purchaseId,
           article_id: item.articleId,
           quantity: typeof item.quantity === 'string' ? parseFloat(item.quantity) : item.quantity,
@@ -828,7 +876,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
         const purchase = await DatabaseService.createPurchase(purchaseData)
 
         // Actualizar stock de artículos
-        for (const item of items) {
+        for (const item of processedItems) {
           await updateArticleStock(item)
         }
 
