@@ -18,6 +18,24 @@ interface InvoiceData {
   currency: string
 }
 
+// Limpia espacios y caracteres "|" al inicio de cada línea
+// Esto mejora significativamente la precisión del parsing
+function cleanLinePrefix(line: string): string {
+  // Eliminar espacios y "|" del inicio de la línea hasta encontrar el primer carácter válido
+  let cleaned = line
+  let index = 0
+
+  while (index < cleaned.length) {
+    const char = cleaned[index]
+    if (char !== ' ' && char !== '|') {
+      break
+    }
+    index++
+  }
+
+  return cleaned.substring(index)
+}
+
 // Normaliza el texto del OCR para corregir errores comunes
 function normalizeOCRText(text: string): string {
   let normalized = text
@@ -47,7 +65,13 @@ function normalizeOCRText(text: string): string {
 function parseInvoiceText(text: string): InvoiceData {
   // Normalizar texto primero
   const normalizedText = normalizeOCRText(text)
-  const lines = normalizedText.split('\n').filter(line => line.trim().length > 0)
+
+  // Limpiar cada línea: eliminar espacios y "|" del inicio antes de procesarlas
+  // Esto mejora significativamente la detección de productos
+  const lines = normalizedText
+    .split('\n')
+    .map(line => cleanLinePrefix(line))
+    .filter(line => line.trim().length > 0)
 
   // Extraer proveedor (usualmente en las primeras líneas)
   const supplier = extractSupplier(lines)
