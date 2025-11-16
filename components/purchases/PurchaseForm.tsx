@@ -95,6 +95,10 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
   const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string; type: 'item' | 'unmatched'; index?: number } | null>(null)
   const [isDeletingItem, setIsDeletingItem] = useState(false)
 
+  // Estados para descuento detectado
+  const [hasDiscount, setHasDiscount] = useState(false)
+  const [discountAmount, setDiscountAmount] = useState<number | string>(0)
+
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -310,6 +314,13 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
 
           setItems(matchedItems)
           setUnmatchedItems(unmatched)
+
+          // Procesar descuento detectado si existe
+          if (invoiceData.detectedDiscount && invoiceData.detectedDiscount > 0) {
+            setHasDiscount(true)
+            setDiscountAmount(invoiceData.detectedDiscount)
+            toast.info(`Descuento detectado: €${invoiceData.detectedDiscount.toFixed(2)}`)
+          }
 
           if (matchedItems.length > 0) {
             toast.success(`${matchedItems.length} artículo(s) añadido(s) automáticamente`)
@@ -759,7 +770,9 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     unit.symbol.toLowerCase().includes(unitSearch.toLowerCase())
   )
 
-  const totalAmount = items.reduce((sum, item) => sum + item.total, 0)
+  const subtotalAmount = items.reduce((sum, item) => sum + item.total, 0)
+  const discountValue = hasDiscount ? (typeof discountAmount === 'string' ? parseFloat(discountAmount) || 0 : discountAmount) : 0
+  const totalAmount = subtotalAmount - discountValue
   const totalItems = items.length
 
   // Detect changes
@@ -1718,14 +1731,65 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                     ))}
                   </div>
 
-                  <div className="border-t border-gray-300 pt-4 mt-4">
-                    <div className="flex justify-between items-center mb-2">
+                  <div className="border-t border-gray-300 pt-4 mt-4 space-y-3">
+                    <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">Total de artículos:</span>
                       <span className="font-semibold text-gray-900">{items.length}</span>
                     </div>
+
                     <div className="flex justify-between items-center">
-                      <span className="text-base font-semibold text-gray-900">Total de la compra:</span>
-                      <span className="text-xl font-bold text-green-600">€{totalAmount.toFixed(2)}</span>
+                      <span className="text-sm text-gray-600">Subtotal:</span>
+                      <span className="font-semibold text-gray-900">€{subtotalAmount.toFixed(2)}</span>
+                    </div>
+
+                    {/* Descuento detectado/editable */}
+                    {hasDiscount && (
+                      <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-orange-800">Descuento detectado:</span>
+                          <button
+                            onClick={() => {
+                              setHasDiscount(false)
+                              setDiscountAmount(0)
+                              toast.success('Descuento eliminado')
+                            }}
+                            className="text-red-600 hover:text-red-700 text-xs underline"
+                          >
+                            Eliminar descuento
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-700">€</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={discountAmount === 0 ? '' : discountAmount}
+                            onChange={(e) => {
+                              let value = e.target.value.replace(/[^0-9.]/g, '')
+                              const parts = value.split('.')
+                              if (parts.length > 2) {
+                                value = parts[0] + '.' + parts.slice(1).join('')
+                              }
+                              if (parts.length === 2 && parts[1].length > 2) {
+                                value = parts[0] + '.' + parts[1].substring(0, 2)
+                              }
+                              setDiscountAmount(value === '' ? 0 : value)
+                            }}
+                            className="flex-1 px-3 py-1.5 border border-orange-300 rounded-lg focus:outline-none focus:border-orange-500 text-sm bg-white"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <p className="text-xs text-orange-700">
+                          Puedes editar el monto del descuento si el procesamiento no fue exacto
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="border-t border-gray-300 pt-3 mt-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-base font-semibold text-gray-900">Total de la compra:</span>
+                        <span className="text-xl font-bold text-green-600">€{totalAmount.toFixed(2)}</span>
+                      </div>
                     </div>
                   </div>
                 </div>

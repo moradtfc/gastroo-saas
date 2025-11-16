@@ -16,6 +16,7 @@ interface InvoiceData {
   subtotal: number
   total: number
   currency: string
+  detectedDiscount?: number // Descuento detectado de items con total negativo
 }
 
 // API Key de Gemini
@@ -175,13 +176,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Filtrar productos con cantidad o total negativo (promociones/descuentos)
+    // Calcular descuento total de items con valores negativos (promociones/descuentos)
     const originalItemsCount = invoiceData.items.length
+    const negativeItems = invoiceData.items.filter(item => item.quantity < 0 || item.total < 0)
+
+    // Sumar todos los descuentos (valores negativos)
+    const totalDiscount = negativeItems.reduce((sum, item) => {
+      return sum + Math.abs(item.total) // Convertir a valor absoluto para el descuento
+    }, 0)
+
+    // Filtrar items negativos de la lista de productos
     invoiceData.items = invoiceData.items.filter(item => item.quantity > 0 && item.total > 0)
+
+    // Agregar descuento detectado si existe
+    if (totalDiscount > 0) {
+      invoiceData.detectedDiscount = totalDiscount
+      console.log(`✓ Descuento detectado: ${invoiceData.currency}${totalDiscount.toFixed(2)} (${negativeItems.length} item(s) con valores negativos)`)
+    }
 
     if (originalItemsCount > invoiceData.items.length) {
       const filteredCount = originalItemsCount - invoiceData.items.length
-      console.log(`✓ Filtrados ${filteredCount} item(s) con valores negativos (promociones/descuentos)`)
+      console.log(`✓ Filtrados ${filteredCount} item(s) con valores negativos del listado de productos`)
     }
 
     // Validar que se hayan extraído datos mínimos
