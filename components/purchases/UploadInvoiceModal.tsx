@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Upload, Loader2, Check } from "lucide-react"
+import { Upload, Loader2, Check, FileText } from "lucide-react"
 import { toast } from "sonner"
 import Image from "next/image"
 import { DatabaseService } from "@/lib/database"
@@ -144,17 +144,23 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess, onNavigateToCre
         return
       }
       setSelectedFile(file)
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        setPreviewUrl(e.target?.result as string)
+
+      // Solo generar preview para imágenes, no para PDFs
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          setPreviewUrl(e.target?.result as string)
+        }
+        reader.readAsDataURL(file)
+      } else {
+        setPreviewUrl(null)
       }
-      reader.readAsDataURL(file)
     }
   }
 
   const handleProcess = async () => {
     if (!selectedFile) {
-      toast.error("Por favor selecciona una imagen")
+      toast.error("Por favor selecciona un archivo")
       return
     }
 
@@ -248,8 +254,8 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess, onNavigateToCre
             <div className="space-y-4">
               <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
                 <p className="text-sm text-gray-700">
-                  📸 <strong>Sube una imagen de tu factura en el mejor estado posible</strong> para que podamos analizarla automáticamente.
-                  Asegúrate de que el texto sea legible y la imagen esté bien iluminada.
+                  📄 <strong>Sube una imagen o PDF de tu factura</strong> para que podamos analizarla automáticamente.
+                  Asegúrate de que el texto sea legible y la calidad sea buena.
                 </p>
               </div>
 
@@ -257,7 +263,7 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess, onNavigateToCre
                 <input
                   type="file"
                   id="invoice-upload"
-                  accept="image/*"
+                  accept="image/*,.pdf,application/pdf"
                   onChange={handleFileSelect}
                   className="hidden"
                 />
@@ -267,10 +273,10 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess, onNavigateToCre
                       <Upload className="mx-auto h-12 w-12 text-gray-400" />
                       <div>
                         <p className="text-lg font-medium text-gray-900">
-                          Haz clic para seleccionar una imagen
+                          Haz clic para seleccionar un archivo
                         </p>
                         <p className="text-sm text-gray-500 mt-2">
-                          PNG, JPG, JPEG o WEBP (máx. 10MB)
+                          PNG, JPG, JPEG, WEBP o PDF (máx. 10MB)
                         </p>
                       </div>
                     </div>
@@ -286,21 +292,28 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess, onNavigateToCre
                         {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
                       </p>
                       <label htmlFor="invoice-upload" className="text-sm text-blue-600 hover:underline cursor-pointer">
-                        Cambiar imagen
+                        Cambiar archivo
                       </label>
                     </div>
                   </div>
                 )}
               </div>
 
-              {previewUrl && (
-                <div className="relative w-full h-64 bg-gray-100 rounded-lg overflow-hidden">
-                  <Image
-                    src={previewUrl}
-                    alt="Preview"
-                    fill
-                    className="object-contain"
-                  />
+              {selectedFile && (
+                <div className="relative w-full h-64 bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
+                  {selectedFile.type === 'application/pdf' ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <FileText className="h-24 w-24 text-red-500" />
+                      <p className="text-sm text-gray-600 font-medium">Archivo PDF seleccionado</p>
+                    </div>
+                  ) : previewUrl ? (
+                    <Image
+                      src={previewUrl}
+                      alt="Preview"
+                      fill
+                      className="object-contain"
+                    />
+                  ) : null}
                 </div>
               )}
             </div>
