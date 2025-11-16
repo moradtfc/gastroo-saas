@@ -16,6 +16,7 @@ interface InvoiceData {
   subtotal: number
   total: number
   currency: string
+  detectedDiscount?: number // Descuento detectado de items con total negativo
 }
 
 // API Key de Gemini
@@ -75,9 +76,11 @@ export async function POST(request: NextRequest) {
 
     // Validar tipo de archivo
     const mediaType = file.type
-    if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mediaType)) {
+    const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
+
+    if (!supportedTypes.includes(mediaType)) {
       return NextResponse.json(
-        { message: 'Formato de imagen no soportado. Use JPEG, PNG, GIF o WEBP.' },
+        { message: 'Formato no soportado. Use JPEG, PNG, GIF, WEBP o PDF.' },
         { status: 400 }
       )
     }
@@ -96,12 +99,14 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(bytes)
     const base64Image = buffer.toString('base64')
 
-    console.log('Procesando factura con Gemini AI...')
-    console.log(`Tamaño de imagen: ${(bytes.byteLength / 1024).toFixed(2)} KB`)
+    const fileType = mediaType === 'application/pdf' ? 'PDF' : 'imagen'
+    console.log(`Procesando factura (${fileType}) con Gemini AI...`)
+    console.log(`Tamaño de archivo: ${(bytes.byteLength / 1024).toFixed(2)} KB`)
+    console.log(`Tipo MIME: ${mediaType}`)
 
     // Generar contenido con Gemini usando schema validation y JSON estructurado
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash-lite',
       contents: {
         role: 'user',
         parts: [
@@ -169,6 +174,26 @@ export async function POST(request: NextRequest) {
         },
         { status: 400 }
       )
+    }
+
+    // Calcular descuento basado en la diferencia entre subtotal y total
+    // Si el total es menor que el subtotal, hay un descuento aplicado
+    const originalItemsCount = invoiceData.items.length
+
+    // Primero filtramos items con valores negativos (no son productos reales)
+    const negativeItems = invoiceData.items.filter(item => item.quantity < 0 || item.total < 0)
+    invoiceData.items = invoiceData.items.filter(item => item.quantity > 0 && item.total > 0)
+
+    if (originalItemsCount > invoiceData.items.length) {
+      const filteredCount = originalItemsCount - invoiceData.items.length
+      console.log(`✓ Filtrados ${filteredCount} item(s) con valores negativos del listado de productos`)
+    }
+
+    // Detectar descuento por diferencia entre subtotal y total
+    if (invoiceData.subtotal > 0 && invoiceData.total > 0 && invoiceData.subtotal > invoiceData.total) {
+      const discount = invoiceData.subtotal - invoiceData.total
+      invoiceData.detectedDiscount = discount
+      console.log(`✓ Descuento detectado: ${invoiceData.currency}${discount.toFixed(2)} (diferencia entre subtotal y total)`)
     }
 
     // Validar que se hayan extraído datos mínimos
