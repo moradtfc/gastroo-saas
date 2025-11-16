@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
 
     // Generar contenido con Gemini usando @google/genai
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-thinking-exp-1219',
+      model: 'gemini-2.0-flash-exp',
       contents: {
         role: 'user',
         parts: [
