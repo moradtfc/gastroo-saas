@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI, Type } from '@google/genai'
 
 interface InvoiceItem {
   name: string
@@ -99,20 +99,48 @@ export async function POST(request: NextRequest) {
     console.log('Procesando factura con Gemini AI...')
     console.log(`Tamaño de imagen: ${(bytes.byteLength / 1024).toFixed(2)} KB`)
 
-    // Generar contenido con Gemini usando @google/genai
+    // Generar contenido con Gemini usando schema validation y JSON estructurado
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: {
         role: 'user',
         parts: [
-          { text: INVOICE_EXTRACTION_PROMPT },
           {
             inlineData: {
               mimeType: mediaType,
               data: base64Image
             }
-          }
+          },
+          { text: INVOICE_EXTRACTION_PROMPT }
         ]
+      },
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            supplier: { type: Type.STRING },
+            date: { type: Type.STRING },
+            currency: { type: Type.STRING },
+            items: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  quantity: { type: Type.NUMBER },
+                  unit: { type: Type.STRING },
+                  price: { type: Type.NUMBER },
+                  total: { type: Type.NUMBER }
+                },
+                required: ['name', 'quantity', 'unit', 'price', 'total']
+              }
+            },
+            subtotal: { type: Type.NUMBER },
+            total: { type: Type.NUMBER }
+          },
+          required: ['supplier', 'date', 'items', 'subtotal', 'total', 'currency']
+        }
       }
     })
 
@@ -125,22 +153,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log('Texto extraído de Gemini:', text)
+    console.log('Respuesta JSON de Gemini:', text)
 
-    // Parsear el JSON de la respuesta
-    // Gemini a veces devuelve el JSON dentro de bloques de código markdown
-    let jsonText = text.trim()
-
-    // Eliminar bloques de código markdown si existen
-    if (jsonText.startsWith('```json')) {
-      jsonText = jsonText.replace(/^```json\s*/i, '').replace(/```\s*$/, '')
-    } else if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```\s*/, '').replace(/```\s*$/, '')
-    }
-
+    // Con responseMimeType: 'application/json', la respuesta ya es JSON válido
     let invoiceData: InvoiceData
     try {
-      invoiceData = JSON.parse(jsonText)
+      invoiceData = JSON.parse(text)
     } catch (parseError) {
       console.error('Error parseando JSON de Gemini:', parseError)
       console.error('Texto recibido:', text)
