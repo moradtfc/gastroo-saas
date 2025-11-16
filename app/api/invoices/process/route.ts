@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
 
     // Generar contenido con Gemini usando schema validation y JSON estructurado
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash-lite',
       contents: {
         role: 'user',
         parts: [
