@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { GoogleGenAI } from '@google/genai'
 
 interface InvoiceItem {
   name: string
@@ -19,6 +20,9 @@ interface InvoiceData {
 
 // API Key de Gemini
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyA4vWfXWpO5-u2tlXlYe2hfR_QhzP0Lmco'
+
+// Inicializar Google GenAI
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY })
 
 // Prompt optimizado para extracción de datos de facturas
 const INVOICE_EXTRACTION_PROMPT = `
@@ -92,52 +96,29 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(bytes)
     const base64Image = buffer.toString('base64')
 
-    console.log('Procesando factura con Gemini AI (API REST)...')
+    console.log('Procesando factura con Gemini AI...')
     console.log(`Tamaño de imagen: ${(bytes.byteLength / 1024).toFixed(2)} KB`)
 
-    // Llamar directamente a la API REST de Gemini usando v1beta
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`
-
-    const requestBody = {
-      contents: [{
-        parts: [
-          { text: INVOICE_EXTRACTION_PROMPT },
-          {
-            inlineData: {
-              mimeType: mediaType,
-              data: base64Image
+    // Generar contenido con Gemini usando @google/genai
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: INVOICE_EXTRACTION_PROMPT },
+            {
+              inlineData: {
+                mimeType: mediaType,
+                data: base64Image
+              }
             }
-          }
-        ]
-      }]
-    }
-
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody)
+          ]
+        }
+      ]
     })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Error de Gemini API:', response.status, errorText)
-
-      return NextResponse.json(
-        {
-          message: `Error al procesar la factura con Gemini AI (${response.status})`,
-          debug: errorText.substring(0, 500)
-        },
-        { status: response.status }
-      )
-    }
-
-    const data = await response.json()
-    console.log('Respuesta de Gemini:', JSON.stringify(data, null, 2))
-
-    // Extraer el texto de la respuesta
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+    const text = response.text
 
     if (!text) {
       return NextResponse.json(
