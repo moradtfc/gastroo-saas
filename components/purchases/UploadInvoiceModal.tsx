@@ -204,6 +204,7 @@ export function UploadInvoiceModal({ isOpen, onClose, onSuccess, onNavigateToCre
         status: 'paid',
         currency: formattedData.currency,
         subtotal: formattedData.subtotal,
+        detectedDiscount: formattedData.detectedDiscount || 0,
         items: formattedData.items.map((item: InvoiceItem, index: number) => ({
           name: item.name,
           quantity: item.quantity,
