@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect, useRef } from "react"
-import { Search, Filter, ChevronDown, Plus, MoreVertical, ArrowUpDown } from "lucide-react"
+import { Search, Filter, ChevronDown, Plus, MoreVertical, ArrowUpDown, Download, Upload } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { DatabaseService, type FoodCategory, type Unit } from "@/lib/database"
@@ -9,7 +9,9 @@ import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import * as XLSX from 'xlsx'
 
 interface Article {
   id: string
@@ -58,6 +60,12 @@ export default function ArticlesPage() {
   const menuRef = useRef<HTMLDivElement>(null)
   const actionsMenuRef = useRef<HTMLDivElement>(null)
   const sortMenuRef = useRef<HTMLDivElement>(null)
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false)
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false)
+  const [exportFormat, setExportFormat] = useState<"xlsx" | "csv">("xlsx")
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     loadArticles()
@@ -209,6 +217,255 @@ export default function ArticlesPage() {
       setSortOrder("asc")
     }
     setOpenSortMenu(false)
+  }
+
+  // Función para exportar colección
+  const handleExportCollection = async () => {
+    try {
+      setIsProcessing(true)
+
+      if (articles.length === 0) {
+        toast.error("No hay artículos para exportar")
+        return
+      }
+
+      // Preparar datos para exportar con todos los campos de la tabla articles
+      const exportData = articles.map(article => ({
+        'ID': article.id,
+        'Nombre': article.name,
+        'Categoría': article.category || '',
+        'SKU': article.sku || '',
+        'Costo por unidad': article.cost_per_unit || 0,
+        'Stock actual': article.current_stock || 0,
+        'Unidad': article.unit || '',
+        'Proveedor': article.suppliers?.name || '',
+        'Color': article.color || '',
+        'URL de imagen': article.image_url || ''
+      }))
+
+      // Crear libro de trabajo
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.json_to_sheet(exportData)
+
+      // Agregar hoja al libro
+      XLSX.utils.book_append_sheet(wb, ws, 'Artículos')
+
+      // Generar archivo y descargar
+      const fileName = `inventario_${new Date().toISOString().split('T')[0]}.${exportFormat}`
+
+      if (exportFormat === 'csv') {
+        XLSX.writeFile(wb, fileName, { bookType: 'csv' })
+      } else {
+        XLSX.writeFile(wb, fileName, { bookType: 'xlsx' })
+      }
+
+      toast.success(`Inventario exportado exitosamente (${articles.length} artículos)`)
+      setIsExportModalOpen(false)
+    } catch (error) {
+      console.error('Error exportando colección:', error)
+      toast.error('Error al exportar colección')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  // Función para descargar plantilla
+  const handleDownloadTemplate = () => {
+    try {
+      // Crear instrucciones
+      const instructions = [
+        ['INSTRUCCIONES PARA IMPORTAR TU INVENTARIO'],
+        [''],
+        ['1. CATEGORÍAS DISPONIBLES:'],
+        ...foodCategories.map(cat => [`   ${cat.icon || '📁'} ${cat.name}`]),
+        [''],
+        ['2. UNIDADES DISPONIBLES:'],
+        ...units.map(unit => [`   ${unit.symbol} - ${unit.name}`]),
+        [''],
+        ['3. REGLAS IMPORTANTES:'],
+        ['   - El nombre del artículo es OBLIGATORIO'],
+        ['   - La categoría debe ser exactamente una de las listadas arriba'],
+        ['   - La unidad debe ser el SÍMBOLO exacto de una de las listadas arriba'],
+        ['   - El costo debe ser un número mayor a 0'],
+        ['   - El stock debe ser un número mayor o igual a 0'],
+        ['   - SKU es opcional'],
+        [''],
+        ['4. Completa la tabla de abajo con tus artículos:'],
+        [''],
+      ]
+
+      // Crear datos de ejemplo
+      const exampleData = [
+        {
+          'Nombre': 'Ejemplo: Tomate Cherry',
+          'Categoría': foodCategories[0]?.name || 'Verduras',
+          'SKU': 'TOM-001',
+          'Costo por unidad': '2.50',
+          'Stock actual': '100',
+          'Unidad': units[0]?.symbol || 'kg'
+        }
+      ]
+
+      // Crear libro de trabajo
+      const wb = XLSX.utils.book_new()
+
+      // Crear hoja de instrucciones
+      const wsInstructions = XLSX.utils.aoa_to_sheet(instructions)
+      XLSX.utils.book_append_sheet(wb, wsInstructions, 'LEER PRIMERO')
+
+      // Crear hoja de datos
+      const wsData = XLSX.utils.json_to_sheet(exampleData)
+      XLSX.utils.book_append_sheet(wb, wsData, 'Artículos')
+
+      // Descargar archivo
+      XLSX.writeFile(wb, 'plantilla_importar_inventario.xlsx')
+      toast.success('Plantilla descargada exitosamente')
+    } catch (error) {
+      console.error('Error descargando plantilla:', error)
+      toast.error('Error al descargar plantilla')
+    }
+  }
+
+  // Función para manejar la selección de archivo
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      // Validar que sea un archivo .xlsx
+      if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+        toast.error('Por favor selecciona un archivo Excel (.xlsx)')
+        return
+      }
+      setImportFile(file)
+    }
+  }
+
+  // Función para procesar e importar el archivo
+  const handleImportCollection = async () => {
+    if (!importFile) {
+      toast.error('Por favor selecciona un archivo')
+      return
+    }
+
+    try {
+      setIsProcessing(true)
+
+      // Leer archivo
+      const data = await importFile.arrayBuffer()
+      const workbook = XLSX.read(data, { type: 'array' })
+
+      // Obtener la hoja de Artículos
+      const sheetName = workbook.SheetNames.find(name => name === 'Artículos') || workbook.SheetNames[0]
+      const worksheet = workbook.Sheets[sheetName]
+      const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[]
+
+      if (jsonData.length === 0) {
+        toast.error('El archivo no contiene datos')
+        return
+      }
+
+      let successCount = 0
+      let errorCount = 0
+      const errors: string[] = []
+
+      // Procesar cada fila
+      for (let i = 0; i < jsonData.length; i++) {
+        const row = jsonData[i]
+        const rowNumber = i + 2 // +2 porque empieza en 1 y tiene header
+
+        try {
+          // Validar nombre (obligatorio)
+          if (!row['Nombre'] || row['Nombre'].toString().trim() === '') {
+            throw new Error(`Fila ${rowNumber}: El nombre es obligatorio`)
+          }
+
+          // Validar categoría (obligatoria)
+          if (!row['Categoría'] || row['Categoría'].toString().trim() === '') {
+            throw new Error(`Fila ${rowNumber}: La categoría es obligatoria`)
+          }
+
+          // Buscar categoría
+          const category = foodCategories.find(
+            c => c.name.toLowerCase() === row['Categoría'].toString().toLowerCase()
+          )
+          if (!category) {
+            throw new Error(`Fila ${rowNumber}: Categoría "${row['Categoría']}" no encontrada`)
+          }
+
+          // Validar unidad (obligatoria)
+          if (!row['Unidad'] || row['Unidad'].toString().trim() === '') {
+            throw new Error(`Fila ${rowNumber}: La unidad es obligatoria`)
+          }
+
+          // Buscar unidad
+          const unit = units.find(
+            u => u.symbol.toLowerCase() === row['Unidad'].toString().toLowerCase()
+          )
+          if (!unit) {
+            throw new Error(`Fila ${rowNumber}: Unidad "${row['Unidad']}" no encontrada`)
+          }
+
+          // Validar costo (obligatorio y debe ser > 0)
+          const cost = parseFloat(row['Costo por unidad']?.toString() || '0')
+          if (!row['Costo por unidad'] || isNaN(cost) || cost <= 0) {
+            throw new Error(`Fila ${rowNumber}: El costo debe ser un número mayor a 0`)
+          }
+
+          // Validar stock (obligatorio y debe ser >= 0)
+          const stock = parseFloat(row['Stock actual']?.toString() || '0')
+          if (row['Stock actual'] === undefined || row['Stock actual'] === null || isNaN(stock) || stock < 0) {
+            throw new Error(`Fila ${rowNumber}: El stock debe ser un número mayor o igual a 0`)
+          }
+
+          // Buscar unidad base para la categoría de la unidad
+          const baseUnitForCategory = units.find(
+            u => u.category_id === unit.category_id && u.base_unit === true
+          )
+
+          // Crear artículo
+          const articleData: any = {
+            name: row['Nombre'].toString().trim(),
+            food_category_id: category.id,
+            unit_id: unit.id,
+            default_unit_id: baseUnitForCategory?.id || unit.id,
+            cost_per_unit: cost,
+            current_stock: stock,
+            sku: row['SKU']?.toString().trim() || undefined,
+            category: category.name,
+            unit: unit.symbol
+          }
+
+          await DatabaseService.createIngredient(articleData)
+          successCount++
+        } catch (error: any) {
+          errorCount++
+          errors.push(error.message)
+          console.error(`Error en fila ${rowNumber}:`, error)
+        }
+      }
+
+      // Mostrar resultados
+      if (successCount > 0) {
+        toast.success(`${successCount} artículo(s) importado(s) exitosamente`)
+        loadArticles() // Recargar lista
+      }
+
+      if (errorCount > 0) {
+        toast.error(`${errorCount} artículo(s) con errores. Revisa la consola para más detalles.`)
+        console.error('Errores de importación:', errors)
+      }
+
+      // Cerrar modal y limpiar
+      setIsImportModalOpen(false)
+      setImportFile(null)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    } catch (error) {
+      console.error('Error importando colección:', error)
+      toast.error('Error al importar colección')
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   const getSortLabel = () => {
@@ -471,6 +728,177 @@ export default function ArticlesPage() {
 
   return (
     <>
+    {/* Modal de Exportar Colección */}
+    <Dialog open={isExportModalOpen} onOpenChange={setIsExportModalOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-xl flex items-center gap-2">
+            <Download className="w-5 h-5 text-blue-600" />
+            Exportar Colección
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          <p className="text-sm text-gray-600">
+            Podrás descargar todo tu inventario actualizado en formato .xlsx o .csv
+          </p>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Formato de exportación
+            </label>
+            <Select
+              value={exportFormat}
+              onValueChange={(value: "xlsx" | "csv") => setExportFormat(value)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
+                <SelectItem value="csv">CSV (.csv)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <p className="text-sm text-blue-900">
+              <strong>Total de artículos:</strong> {articles.length}
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setIsExportModalOpen(false)}
+            disabled={isProcessing}
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleExportCollection}
+            disabled={isProcessing || articles.length === 0}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            {isProcessing ? "Exportando..." : "Exportar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Modal de Importar Colección */}
+    <Dialog open={isImportModalOpen} onOpenChange={setIsImportModalOpen}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="text-xl flex items-center gap-2">
+            <Upload className="w-5 h-5 text-blue-600" />
+            Importar Colección
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <p className="text-sm text-yellow-900 font-medium mb-2">
+              📋 Descarga nuestra plantilla para importar tu inventario
+            </p>
+            <p className="text-sm text-yellow-800">
+              Lee las instrucciones detenidamente para que tu inventario se importe correctamente.
+            </p>
+          </div>
+
+          <Button
+            onClick={handleDownloadTemplate}
+            variant="outline"
+            className="w-full border-blue-500 text-blue-600 hover:bg-blue-50"
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Descargar Plantilla
+          </Button>
+
+          <div className="border-t border-gray-200 pt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Subir Inventario
+            </label>
+            <p className="text-xs text-gray-500 mb-3">
+              Solo se aceptan archivos .xlsx con la estructura de la plantilla
+            </p>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={handleFileSelect}
+              className="hidden"
+              id="file-upload"
+            />
+
+            <label
+              htmlFor="file-upload"
+              className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-all"
+            >
+              {importFile ? (
+                <div className="text-center">
+                  <Upload className="w-8 h-8 mx-auto mb-2 text-blue-600" />
+                  <p className="text-sm font-medium text-gray-900">{importFile.name}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {(importFile.size / 1024).toFixed(2)} KB
+                  </p>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <Upload className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                  <p className="text-sm text-gray-600">
+                    Haz clic para seleccionar un archivo
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Solo archivos .xlsx
+                  </p>
+                </div>
+              )}
+            </label>
+
+            {importFile && (
+              <button
+                onClick={() => {
+                  setImportFile(null)
+                  if (fileInputRef.current) {
+                    fileInputRef.current.value = ''
+                  }
+                }}
+                className="mt-2 text-sm text-red-600 hover:text-red-700 font-medium"
+              >
+                Quitar archivo
+              </button>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setIsImportModalOpen(false)
+              setImportFile(null)
+              if (fileInputRef.current) {
+                fileInputRef.current.value = ''
+              }
+            }}
+            disabled={isProcessing}
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleImportCollection}
+            disabled={!importFile || isProcessing}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            {isProcessing ? "Importando..." : "Subir Inventario"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     {/* Modal de creación rápida */}
     <Dialog open={isQuickCreateModalOpen} onOpenChange={setIsQuickCreateModalOpen}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -718,7 +1146,10 @@ export default function ArticlesPage() {
               </span>
             </div>
             <div className="flex items-center gap-4">
-              <button className="text-blue-600 font-medium hover:text-blue-700 transition-colors cursor-pointer">
+              <button
+                onClick={() => setIsImportModalOpen(true)}
+                className="text-blue-600 font-medium hover:text-blue-700 transition-colors cursor-pointer"
+              >
                 Importar colección
               </button>
               <button
@@ -834,7 +1265,7 @@ export default function ArticlesPage() {
                 <button
                   onClick={() => {
                     setOpenActionsMenu(false)
-                    toast.info("Función de importación en desarrollo")
+                    setIsImportModalOpen(true)
                   }}
                   className="w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer"
                 >
@@ -843,7 +1274,7 @@ export default function ArticlesPage() {
                 <button
                   onClick={() => {
                     setOpenActionsMenu(false)
-                    toast.info("Función de exportación en desarrollo")
+                    setIsExportModalOpen(true)
                   }}
                   className="w-full text-left px-4 py-3 hover:bg-gray-50 text-gray-700 text-sm transition-colors cursor-pointer"
                 >

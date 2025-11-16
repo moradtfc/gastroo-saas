@@ -67,6 +67,7 @@
     "vue": "latest",
     "vue-router": "latest",
     "ws": "^8.18.3",
+    "xlsx": "^0.18.5",
     "zod": "3.25.67"
   },
   "devDependencies": {
