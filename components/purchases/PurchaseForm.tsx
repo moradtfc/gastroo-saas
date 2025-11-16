@@ -13,6 +13,7 @@ import { Search, X, Trash2, ChevronDown, Calendar, Undo2, Plus, RefreshCw } from
 import Link from "next/link"
 import { advancedSimilarity } from "@/lib/text-similarity"
 import { CreateSupplierModal } from "@/app/(dashboard)/suppliers/create-supplier-modal"
+import { DeleteConfirmationModal } from "@/components/ui/delete-confirmation-modal"
 
 interface Article {
   id: string
@@ -90,6 +91,9 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     unitId: string
     costPerUnit: string
   }>>([])
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null)
+  const [isDeletingItem, setIsDeletingItem] = useState(false)
 
   const [formData, setFormData] = useState({
     name: "",
@@ -655,6 +659,34 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
 
     // Guardar el índice del item para eliminarlo después de crear el artículo si el usuario quiere
     setAssigningItemIndex(index)
+  }
+
+  const openDeleteItemModal = (id: string, name: string) => {
+    setItemToDelete({ id, name })
+    setDeleteModalOpen(true)
+  }
+
+  const closeDeleteItemModal = () => {
+    setDeleteModalOpen(false)
+    setItemToDelete(null)
+    setIsDeletingItem(false)
+  }
+
+  const confirmRemoveItem = () => {
+    if (!itemToDelete) return
+
+    setIsDeletingItem(true)
+
+    const itemToRemove = items.find(item => item.id === itemToDelete.id)
+
+    // Si el item tiene un articleId temporal, también eliminarlo de pendingArticles
+    if (itemToRemove && itemToRemove.articleId.startsWith('pending-')) {
+      setPendingArticles(prev => prev.filter(pa => pa.tempId !== itemToRemove.articleId))
+    }
+
+    setItems(items.filter(item => item.id !== itemToDelete.id))
+    toast.success('Artículo eliminado de la compra')
+    closeDeleteItemModal()
   }
 
   const removeItem = (id: string) => {
@@ -1520,8 +1552,9 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                           </button>
                         )}
                         <button
-                          onClick={() => removeItem(item.id)}
+                          onClick={() => openDeleteItemModal(item.id, item.articleName)}
                           className="text-red-600 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                          title="Eliminar artículo"
                         >
                           <Trash2 size={18} />
                         </button>
@@ -1863,6 +1896,17 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
         isOpen={isCreateSupplierModalOpen}
         onClose={() => setIsCreateSupplierModalOpen(false)}
         onSuccess={handleCreateSupplierSuccess}
+      />
+
+      {/* Modal de confirmación de eliminación */}
+      <DeleteConfirmationModal
+        isOpen={deleteModalOpen}
+        onClose={closeDeleteItemModal}
+        onConfirm={confirmRemoveItem}
+        title="Eliminar Artículo"
+        description="¿Estás seguro de que deseas remover el artículo"
+        itemName={itemToDelete?.name || ''}
+        isLoading={isDeletingItem}
       />
     </>
   )
