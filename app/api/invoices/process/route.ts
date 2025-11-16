@@ -176,27 +176,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Calcular descuento total de items con valores negativos (promociones/descuentos)
+    // Calcular descuento basado en la diferencia entre subtotal y total
+    // Si el total es menor que el subtotal, hay un descuento aplicado
     const originalItemsCount = invoiceData.items.length
+
+    // Primero filtramos items con valores negativos (no son productos reales)
     const negativeItems = invoiceData.items.filter(item => item.quantity < 0 || item.total < 0)
-
-    // Sumar todos los descuentos (valores negativos)
-    const totalDiscount = negativeItems.reduce((sum, item) => {
-      return sum + Math.abs(item.total) // Convertir a valor absoluto para el descuento
-    }, 0)
-
-    // Filtrar items negativos de la lista de productos
     invoiceData.items = invoiceData.items.filter(item => item.quantity > 0 && item.total > 0)
-
-    // Agregar descuento detectado si existe
-    if (totalDiscount > 0) {
-      invoiceData.detectedDiscount = totalDiscount
-      console.log(`✓ Descuento detectado: ${invoiceData.currency}${totalDiscount.toFixed(2)} (${negativeItems.length} item(s) con valores negativos)`)
-    }
 
     if (originalItemsCount > invoiceData.items.length) {
       const filteredCount = originalItemsCount - invoiceData.items.length
       console.log(`✓ Filtrados ${filteredCount} item(s) con valores negativos del listado de productos`)
+    }
+
+    // Detectar descuento por diferencia entre subtotal y total
+    if (invoiceData.subtotal > 0 && invoiceData.total > 0 && invoiceData.subtotal > invoiceData.total) {
+      const discount = invoiceData.subtotal - invoiceData.total
+      invoiceData.detectedDiscount = discount
+      console.log(`✓ Descuento detectado: ${invoiceData.currency}${discount.toFixed(2)} (diferencia entre subtotal y total)`)
     }
 
     // Validar que se hayan extraído datos mínimos
