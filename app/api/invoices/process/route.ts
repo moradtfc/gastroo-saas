@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Tesseract from 'tesseract.js'
+import { GoogleGenAI, Type } from '@google/genai'
 
 interface InvoiceItem {
   name: string
@@ -18,562 +18,48 @@ interface InvoiceData {
   currency: string
 }
 
-// Limpia espacios y caracteres "|" al inicio de cada línea
-// Esto mejora significativamente la precisión del parsing
-function cleanLinePrefix(line: string): string {
-  // Eliminar espacios y "|" del inicio de la línea hasta encontrar el primer carácter válido
-  let cleaned = line
-  let index = 0
+// API Key de Gemini
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyA4vWfXWpO5-u2tlXlYe2hfR_QhzP0Lmco'
 
-  while (index < cleaned.length) {
-    const char = cleaned[index]
-    if (char !== ' ' && char !== '|') {
-      break
+// Inicializar Google GenAI
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY })
+
+// Prompt optimizado para extracción de datos de facturas
+const INVOICE_EXTRACTION_PROMPT = `
+Analiza esta imagen de factura y extrae la información en formato JSON.
+
+IMPORTANTE:
+- Extrae SOLO los productos/items comprados, NO incluyas líneas de resumen como "TOTAL", "SUBTOTAL", "IVA", etc.
+- Si encuentras las palabras "TOTAL" o "SUBTOTAL" en una línea, esa línea NO es un producto, es el resumen.
+- La lista de productos termina cuando aparece "SUBTOTAL" o "TOTAL".
+
+Devuelve un JSON con esta estructura exacta:
+{
+  "supplier": "Nombre del proveedor/tienda",
+  "date": "YYYY-MM-DD",
+  "currency": "€" o "$" o "£",
+  "items": [
+    {
+      "name": "Nombre del producto (limpio, sin códigos ni símbolos)",
+      "quantity": número,
+      "unit": "kg" | "g" | "L" | "ml" | "unidad",
+      "price": precio_unitario_decimal,
+      "total": total_decimal
     }
-    index++
-  }
-
-  return cleaned.substring(index)
+  ],
+  "subtotal": número_decimal,
+  "total": número_decimal
 }
 
-// Normaliza el texto del OCR para corregir errores comunes
-function normalizeOCRText(text: string): string {
-  let normalized = text
-
-  // Corregir símbolos de moneda confundidos por el OCR
-  normalized = normalized.replace(/[¢¤©]/g, '€')  // ¢ © ¤ → €
-  normalized = normalized.replace(/(\d+[.,]\d+)\s*e\s/gi, '$1 € ')  // "0,15e " → "0,15 € "
-  normalized = normalized.replace(/(\d+[.,]\d+)e([^a-z]|$)/gi, '$1€$2')  // "0,15e" → "0,15€"
-
-  // Corregir ceros confundidos con letras O
-  normalized = normalized.replace(/([0-9])O([0-9])/g, '$10$2')
-
-  // Corregir precios mal escaneados: "283€" probablemente es "2.83€"
-  // Si un precio tiene 3+ dígitos enteros sin decimales, insertar punto decimal
-  normalized = normalized.replace(/(\s|^)(\d{3,})€/g, (match, space, num) => {
-    // Si es un número grande como 283, convertir a 2.83
-    if (num.length === 3 && parseInt(num) > 100) {
-      return `${space}${num.slice(0, -2)}.${num.slice(-2)}€`
-    }
-    return match
-  })
-
-  return normalized
-}
-
-// Parser inteligente para extraer datos de facturas
-function parseInvoiceText(text: string): InvoiceData {
-  // Normalizar texto primero
-  const normalizedText = normalizeOCRText(text)
-
-  console.log('=== LIMPIEZA DE LÍNEAS ===')
-
-  // Limpiar cada línea: eliminar espacios y "|" del inicio antes de procesarlas
-  // Esto mejora significativamente la detección de productos
-  const rawLines = normalizedText.split('\n')
-  const lines = rawLines
-    .map((line, index) => {
-      const cleaned = cleanLinePrefix(line)
-      if (line !== cleaned && line.trim().length > 0) {
-        console.log(`Línea ${index + 1} LIMPIADA:`)
-        console.log(`  Antes:   "${line}"`)
-        console.log(`  Después: "${cleaned}"`)
-      }
-      return cleaned
-    })
-    .filter(line => line.trim().length > 0)
-
-  console.log(`Total de líneas procesadas: ${rawLines.length}`)
-  console.log(`Líneas válidas después de limpieza: ${lines.length}`)
-  console.log('\n=== TEXTO LIMPIO COMPLETO ===')
-  console.log(lines.join('\n'))
-  console.log('=== FIN LIMPIEZA ===\n')
-
-  // Extraer proveedor (usualmente en las primeras líneas)
-  const supplier = extractSupplier(lines)
-
-  // Extraer fecha
-  const date = extractDate(normalizedText)
-
-  // Extraer moneda
-  const currency = extractCurrency(normalizedText)
-
-  // Extraer items (productos con cantidades y precios)
-  const items = extractItems(lines, currency)
-
-  // Extraer el total de la factura (TOTAL ENTREGADO, TOTAL A PAGAR, etc.)
-  const total = extractTotal(normalizedText)
-
-  // Calcular subtotal de los items
-  const subtotal = items.reduce((sum, item) => sum + item.total, 0)
-
-  return {
-    supplier,
-    date,
-    items,
-    subtotal,
-    total,
-    currency
-  }
-}
-
-// Extrae el nombre del proveedor de las primeras líneas
-function extractSupplier(lines: string[]): string {
-  // El proveedor suele estar en las primeras 3-5 líneas
-  // Buscamos la línea más larga o la que contenga palabras clave
-  const topLines = lines.slice(0, 5)
-
-  // Buscar líneas con palabras clave de empresa
-  const companyKeywords = ['s.l.', 's.a.', 'ltd', 'inc', 'gmbh', 'sl', 'sa', 'ltda']
-  for (const line of topLines) {
-    const lowerLine = line.toLowerCase()
-    if (companyKeywords.some(keyword => lowerLine.includes(keyword))) {
-      return line.trim()
-    }
-  }
-
-  // Si no encuentra, buscar la primera línea que no sea número o fecha
-  for (const line of topLines) {
-    const cleaned = line.trim()
-    if (cleaned.length > 3 && !/^[\d\/\-\.\s]+$/.test(cleaned)) {
-      return cleaned
-    }
-  }
-
-  return topLines[0]?.trim() || 'Proveedor desconocido'
-}
-
-// Extrae la fecha en varios formatos
-function extractDate(text: string): string {
-  // Patrones de fecha comunes
-  const patterns = [
-    /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/,  // DD/MM/YYYY o DD-MM-YYYY
-    /(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/,  // YYYY/MM/DD
-    /(\d{1,2})\s+(?:de\s+)?([a-z]+)\s+(?:de\s+)?(\d{4})/i  // DD de mes de YYYY
-  ]
-
-  const monthMap: { [key: string]: string } = {
-    'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04',
-    'mayo': '05', 'junio': '06', 'julio': '07', 'agosto': '08',
-    'septiembre': '09', 'octubre': '10', 'noviembre': '11', 'diciembre': '12',
-    'ene': '01', 'feb': '02', 'mar': '03', 'abr': '04',
-    'may': '05', 'jun': '06', 'jul': '07', 'ago': '08',
-    'sep': '09', 'oct': '10', 'nov': '11', 'dic': '12'
-  }
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern)
-    if (match) {
-      if (pattern.toString().includes('de')) {
-        // Formato: DD de mes de YYYY
-        const day = match[1].padStart(2, '0')
-        const month = monthMap[match[2].toLowerCase()] || '01'
-        let year = match[3]
-
-        // Corregir errores comunes del OCR en el año
-        if (year.startsWith('20') && parseInt(year) > 2050) {
-          // Si es 2075, probablemente es 2025 (error OCR de 7 por 2)
-          year = '20' + year.slice(2).replace(/7/g, '2')
-        }
-
-        return `${year}-${month}-${day}`
-      } else if (match[1].length === 4) {
-        // Formato: YYYY/MM/DD
-        let year = match[1]
-
-        // Corregir errores comunes del OCR en el año
-        if (year.startsWith('20') && parseInt(year) > 2050) {
-          year = '20' + year.slice(2).replace(/7/g, '2')
-        }
-
-        return `${year}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`
-      } else {
-        // Formato: DD/MM/YYYY
-        let year = match[3]
-
-        // Corregir errores comunes del OCR en el año (ej: 2075 → 2025)
-        if (year.startsWith('20') && parseInt(year) > 2050) {
-          year = '20' + year.slice(2).replace(/7/g, '2')
-        }
-
-        return `${year}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`
-      }
-    }
-  }
-
-  // Si no encuentra fecha, usar fecha actual
-  return new Date().toISOString().split('T')[0]
-}
-
-// Extrae el símbolo de moneda
-function extractCurrency(text: string): string {
-  if (text.includes('€') || text.toLowerCase().includes('eur')) return '€'
-  if (text.includes('$') || text.toLowerCase().includes('usd')) return '$'
-  if (text.includes('£') || text.toLowerCase().includes('gbp')) return '£'
-  return '€' // Por defecto
-}
-
-// Extrae el total de la factura (TOTAL ENTREGADO, TOTAL A PAGAR, etc.)
-function extractTotal(text: string): number {
-  const lines = text.split('\n')
-
-  // Buscar líneas que contengan "TOTAL ENTREGADO", "TOTAL A PAGAR", "IMPORTE TOTAL", etc.
-  const totalKeywords = [
-    /TOTAL\s+ENTREGADO.*?(\d+[.,]\d{2})/i,
-    /TOTAL\s+A\s+PAGAR.*?(\d+[.,]\d{2})/i,
-    /IMPORTE\s+TOTAL.*?(\d+[.,]\d{2})/i,
-    /(?:^|\s)TOTAL\s*[:\.]?\s*(\d+[.,]\d{2})\s*€?\s*$/i,
-    /TOTAL.*?(\d+[.,]\d{2})\s*€\s*$/i
-  ]
-
-  for (const line of lines) {
-    // Ignorar líneas con "SUBTOTAL"
-    if (/SUBTOTAL/i.test(line)) continue
-
-    for (const pattern of totalKeywords) {
-      const match = line.match(pattern)
-      if (match) {
-        const totalStr = match[1].replace(',', '.')
-        const total = parseFloat(totalStr)
-        if (!isNaN(total) && total > 0) {
-          console.log(`Total extraído: ${total} € de línea: "${line.trim()}"`)
-          return total
-        }
-      }
-    }
-  }
-
-  // Buscar cualquier línea con "TOTAL" seguida de un número grande (> 10€)
-  for (const line of lines) {
-    if (/\bTOTAL\b/i.test(line) && !/SUBTOTAL/i.test(line)) {
-      const numbers = line.match(/(\d+[.,]\d{2})/g)
-      if (numbers) {
-        // Tomar el número más grande de la línea
-        const totals = numbers.map(n => parseFloat(n.replace(',', '.')))
-        const maxTotal = Math.max(...totals)
-        if (maxTotal > 10) {
-          console.log(`Total extraído (fallback): ${maxTotal} € de línea: "${line.trim()}"`)
-          return maxTotal
-        }
-      }
-    }
-  }
-
-  // Si no encontramos el total, devolver 0
-  return 0
-}
-
-// Detecta si una línea parece el nombre de un producto
-function looksLikeProductName(line: string): boolean {
-  const cleaned = line.trim()
-
-  // Muy corta, probablemente no es un producto
-  if (cleaned.length < 3) return false
-
-  // Es un header o separador
-  if (/^[\-=_\s]+$/.test(cleaned)) return false
-  if (/^(DESCRIPCION|PRODUCTO|CANTIDAD|PRECIO|TOTAL|SUBTOTAL)/i.test(cleaned)) return false
-
-  // Es información de la tienda o footer
-  if (/^(GEMINIS|MADRID|AHORRAMAS|CAJA|TICKET|TÍCUE|GRACIAS|TELEFONO|ATENCION|CLIENTE|WEB|NUMERO|ARTICULOS|FACTURA|SIMPLIFICARA|CAMBIO|ENTREGADO|EFECTIVA)/i.test(cleaned)) return false
-
-  // Tiene demasiados caracteres raros (ruido del OCR al final de la factura)
-  const alphaCount = (cleaned.match(/[a-zA-Z]/g) || []).length
-  const totalChars = cleaned.replace(/\s/g, '').length
-  if (totalChars > 0 && alphaCount / totalChars < 0.3) return false
-
-  // Parece un nombre de producto válido
-  return true
-}
-
-// Extrae los items de la factura con detección mejorada de patrones
-function extractItems(lines: string[], currency: string): InvoiceItem[] {
-  const items: InvoiceItem[] = []
-
-  // Buscar el índice donde termina la lista de productos
-  let totalIndex = -1
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (/SUBTOTAL/i.test(line)) continue
-
-    if (/\bTOTAL\b/i.test(line)) {
-      const numbers = line.match(/\d+[.,]\d+/g)
-      if (numbers && numbers.length > 0) {
-        const maxNum = Math.max(...numbers.map(n => parseFloat(n.replace(',', '.'))))
-        if (maxNum >= 10) {
-          totalIndex = i
-          console.log(`\n🛑 TOTAL detectado en línea ${i + 1}: "${line.trim()}"`)
-          break
-        }
-      }
-    }
-  }
-
-  const productLines = totalIndex !== -1 ? lines.slice(0, totalIndex) : lines
-  console.log(`\n📦 Procesando ${productLines.length} líneas buscando productos\n`)
-
-  const processedLines = new Set<number>()
-
-  for (let i = 0; i < productLines.length; i++) {
-    if (processedLines.has(i)) continue
-
-    const line = productLines[i]
-    const cleanLine = line.trim()
-
-    // Saltar líneas vacías o muy cortas
-    if (cleanLine.length < 3) continue
-
-    let productDetected = false
-
-    // ========== PATRÓN 1: Peso/cantidad con precio unitario ==========
-    // Ejemplo: "0,615 kg x 2,69 €/kg G 1,68 €"
-    const weightPriceMatch = line.match(/(\d+[.,]\d+)\s*(kg|g|l|ml|un)\s*x\s*(\d+[.,]\d+)\s*[€¢¤©]?\s*[\/]?\s*(?:kg|g|l|ml|un)?/i)
-
-    if (weightPriceMatch) {
-      const quantity = parseFloat(weightPriceMatch[1].replace(',', '.'))
-      const unit = weightPriceMatch[2].toLowerCase()
-      const unitPrice = parseFloat(weightPriceMatch[3].replace(',', '.'))
-
-      // Buscar el precio total en la misma línea
-      const restOfLine = line.substring(line.indexOf(weightPriceMatch[0]) + weightPriceMatch[0].length)
-      const totalMatch = restOfLine.match(/(\d+[.,]\d+)\s*[€¢¤©]/i)
-
-      let total = 0
-      if (totalMatch) {
-        total = parseFloat(totalMatch[1].replace(',', '.'))
-      } else {
-        total = quantity * unitPrice
-      }
-
-      // Nombre del producto: antes del patrón de cantidad
-      let name = line.substring(0, line.indexOf(weightPriceMatch[1]))
-
-      // Si el nombre está en la línea anterior (producto multi-línea)
-      if (name.trim().length < 3 && i > 0 && !processedLines.has(i - 1)) {
-        const prevLine = productLines[i - 1]
-        if (looksLikeProductName(prevLine)) {
-          name = prevLine
-          processedLines.add(i - 1)
-          console.log(`  ↑ Nombre encontrado en línea anterior: "${prevLine}"`)
-        }
-      }
-
-      name = cleanProductName(name)
-
-      if (name.length > 2 && total > 0) {
-        console.log(`✅ PRODUCTO (Patrón 1 - peso/precio): "${name}" | ${quantity} ${unit} x ${unitPrice}€ = ${total.toFixed(2)}€`)
-        items.push({
-          name,
-          quantity,
-          unit,
-          price: unitPrice,
-          total: parseFloat(total.toFixed(2))
-        })
-        processedLines.add(i)
-        productDetected = true
-        continue
-      }
-    }
-
-    if (productDetected) continue
-
-    // ========== PATRÓN 2: Cantidad en unidades ==========
-    // Ejemplo: "4 Un x 1,75 €/n A 7,00€"
-    const quantityPriceMatch = line.match(/(\d+)\s*Un\s*x\s*(\d+[.,]\d+).*?(\d+[.,]\d+)\s*[€¢¤]/i)
-
-    if (quantityPriceMatch) {
-      const quantity = parseInt(quantityPriceMatch[1])
-      const unitPrice = parseFloat(quantityPriceMatch[2].replace(',', '.'))
-      const total = parseFloat(quantityPriceMatch[3].replace(',', '.'))
-
-      let name = line.substring(0, line.indexOf(quantityPriceMatch[0]))
-
-      // Si el nombre está en la línea anterior
-      if (name.trim().length < 3 && i > 0 && !processedLines.has(i - 1)) {
-        const prevLine = productLines[i - 1]
-        if (looksLikeProductName(prevLine)) {
-          name = prevLine
-          processedLines.add(i - 1)
-          console.log(`  ↑ Nombre encontrado en línea anterior: "${prevLine}"`)
-        }
-      }
-
-      name = cleanProductName(name)
-
-      if (name.length > 2) {
-        console.log(`✅ PRODUCTO (Patrón 2 - unidades): "${name}" | ${quantity} unidades x ${unitPrice}€ = ${total.toFixed(2)}€`)
-        items.push({
-          name,
-          quantity,
-          unit: 'unidad',
-          price: unitPrice,
-          total
-        })
-        processedLines.add(i)
-        productDetected = true
-        continue
-      }
-    }
-
-    if (productDetected) continue
-
-    // ========== PATRÓN 3: Precio simple al final ==========
-    // Ejemplo: "CALDO CASERO GALLINA BLANCA A 2,20 €"
-    const simplePriceMatch = line.match(/(\d+[.,]\d+)\s*[€¢¤©]/i)
-
-    if (simplePriceMatch) {
-      // Evitar líneas que no son productos
-      const upperLine = line.toUpperCase()
-      if (/TOTAL|SUBTOTAL|IVA|IMPUESTO|DESCUENTO|PROMOCION|CAMBIO|ENTREGADO|EFECTIVA|-\d+[.,]\d+/i.test(upperLine)) {
-        continue
-      }
-
-      const total = parseFloat(simplePriceMatch[1].replace(',', '.'))
-      let name = cleanProductName(line.substring(0, line.indexOf(simplePriceMatch[0])))
-
-      // Si el nombre es muy corto, buscar en la línea anterior
-      if (name.length < 5 && i > 0 && !processedLines.has(i - 1)) {
-        const prevLine = productLines[i - 1]
-        const prevHasPrice = /\d+[.,]\d+\s*[€¢¤©]/i.test(prevLine)
-
-        if (!prevHasPrice && looksLikeProductName(prevLine)) {
-          name = cleanProductName(prevLine)
-          if (name.length > 3) {
-            processedLines.add(i - 1)
-            console.log(`  ↑ Nombre encontrado en línea anterior: "${prevLine}"`)
-          }
-        }
-      }
-
-      if (name.length > 2 && total > 0.01) {
-        console.log(`✅ PRODUCTO (Patrón 3 - precio simple): "${name}" | 1 ${extractUnit(line)} = ${total.toFixed(2)}€`)
-        items.push({
-          name,
-          quantity: 1,
-          unit: extractUnit(line),
-          price: total,
-          total
-        })
-        processedLines.add(i)
-        productDetected = true
-        continue
-      }
-    }
-
-    if (productDetected) continue
-
-    // ========== PATRÓN 4: Producto sin precio (para completar manualmente) ==========
-    // Si la línea parece un producto pero no tiene precio
-    if (!processedLines.has(i) && looksLikeProductName(line)) {
-      const name = cleanProductName(line)
-
-      // Solo agregar si el nombre es significativo y no es ruido
-      if (name.length >= 5 && /[a-zA-Z]{3,}/.test(name)) {
-        console.log(`⚠️  PRODUCTO SIN PRECIO: "${name}" (usuario debe completar datos)`)
-        items.push({
-          name,
-          quantity: 1,
-          unit: 'unidad',
-          price: 0,
-          total: 0
-        })
-        processedLines.add(i)
-      }
-    }
-  }
-
-  console.log(`\n✨ Total de productos extraídos: ${items.length}\n`)
-
-  return items
-}
-
-// Función mejorada para limpiar el nombre del producto
-function cleanProductName(rawName: string): string {
-  let name = rawName
-
-  // Remover símbolos de moneda (incluyendo caracteres confundidos por OCR)
-  name = name.replace(/[€$£¢¤©]/g, ' ')
-
-  // Remover números con decimales (precios)
-  name = name.replace(/\d+[.,]\d+/g, ' ')
-
-  // Remover patrones de cantidad y peso
-  name = name.replace(/\d+\s*(kg|g|l|ml|un|unidad|unidades)/gi, ' ')
-  name = name.replace(/x\s*\d+/gi, ' ')
-
-  // Remover códigos y letras sueltas comunes del OCR (2 caracteres o menos)
-  name = name.replace(/\s+[A-Z]{1,2}(\s+|$)/gi, ' ')  // A, B, C, EA, EU, etc.
-
-  // Remover palabras cortas sin sentido (ruido del OCR) - más agresivo
-  name = name.replace(/\b(Ea|Eo|Hi|EU|NA|Po|Noid|WE|Cr|oe|Fr|ko|cre|Rory|Guar)\b/gi, ' ')
-
-  // Remover guiones, barras y caracteres especiales
-  name = name.replace(/[\-—_|]+/g, ' ')
-  name = name.replace(/[\.]+\s*$/g, '')  // Puntos al final
-
-  // Remover símbolos y números al final (patrones como "1" "20%" al final)
-  name = name.replace(/\s+\d+\s*%?\s*$/g, '')
-  name = name.replace(/\s+\d+\s*$/g, '')
-
-  // Limpiar comas extrañas (ej: "PA,ATA" → "PA ATA")
-  name = name.replace(/,/g, ' ')
-
-  // Remover puntos sueltos
-  name = name.replace(/\s+\.\s+/g, ' ')
-
-  // Remover espacios múltiples
-  name = name.replace(/\s+/g, ' ').trim()
-
-  return name
-}
-
-// Extrae todos los números de una línea
-function extractNumbers(line: string): number[] {
-  const numbers: number[] = []
-
-  // Limpiar símbolos de moneda
-  const cleaned = line.replace(/[€$£]/g, ' ')
-
-  // Buscar patrones de números (incluyendo decimales con . o ,)
-  const matches = cleaned.matchAll(/(\d+)[.,]?(\d*)/g)
-
-  for (const match of matches) {
-    const whole = match[1]
-    const decimal = match[2] || '0'
-    const number = parseFloat(`${whole}.${decimal}`)
-    if (!isNaN(number)) {
-      numbers.push(number)
-    }
-  }
-
-  return numbers
-}
-
-// Extrae la unidad de medida
-function extractUnit(line: string): string {
-  const lowerLine = line.toLowerCase()
-
-  // Unidades comunes en orden de prioridad
-  const units = [
-    { pattern: /\bkg\b/i, unit: 'kg' },
-    { pattern: /\bg\b/i, unit: 'g' },
-    { pattern: /\blitros?\b/i, unit: 'L' },
-    { pattern: /\bl\b/i, unit: 'L' },
-    { pattern: /\bml\b/i, unit: 'ml' },
-    { pattern: /\bunidades?\b/i, unit: 'unidad' },
-    { pattern: /\bud\b/i, unit: 'unidad' },
-    { pattern: /\bpcs\b/i, unit: 'unidad' },
-    { pattern: /\bpz\b/i, unit: 'unidad' }
-  ]
-
-  for (const { pattern, unit } of units) {
-    if (pattern.test(lowerLine)) {
-      return unit
-    }
-  }
-
-  return 'unidad'
-}
+Reglas:
+1. Nombres de productos: Limpia códigos, símbolos, y caracteres extraños. Solo el nombre legible.
+2. Números: Usa formato decimal con punto (ej: 2.50, no 2,50)
+3. Fecha: Formato YYYY-MM-DD siempre
+4. Si no puedes determinar algún valor, usa: 0 para números, "desconocido" para textos, "unidad" para units
+5. NO incluyas en items: líneas con TOTAL, SUBTOTAL, IVA, IMPUESTOS, DESCUENTOS, CAMBIO, etc.
+
+Responde SOLO con el JSON, sin explicaciones adicionales.
+`.trim()
 
 export async function POST(request: NextRequest) {
   try {
@@ -596,50 +82,128 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Convertir archivo a buffer
+    // Validar que la API key esté configurada
+    if (!GEMINI_API_KEY || GEMINI_API_KEY === '') {
+      console.error('GEMINI_API_KEY no está configurada')
+      return NextResponse.json(
+        { message: 'Error de configuración del servidor. Contacte al administrador.' },
+        { status: 500 }
+      )
+    }
+
+    // Convertir archivo a buffer y luego a base64
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
+    const base64Image = buffer.toString('base64')
 
-    console.log('Procesando factura con OCR...')
+    console.log('Procesando factura con Gemini AI...')
+    console.log(`Tamaño de imagen: ${(bytes.byteLength / 1024).toFixed(2)} KB`)
 
-    // Procesar imagen con Tesseract.js con configuración optimizada para facturas
-    const { data } = await Tesseract.recognize(
-      buffer,
-      'spa+eng', // Idioma español e inglés para mejor detección de marcas/códigos
-      {
-        logger: m => {
-          if (m.status === 'recognizing text') {
-            console.log(`OCR Progress: ${(m.progress * 100).toFixed(0)}%`)
-          }
-        },
-        // Configuración optimizada para documentos estructurados como facturas
-        tessedit_pageseg_mode: Tesseract.PSM.AUTO, // Detección automática del layout
-        preserve_interword_spaces: '1', // Preservar espacios entre palabras
+    // Generar contenido con Gemini usando schema validation y JSON estructurado
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: {
+        role: 'user',
+        parts: [
+          {
+            inlineData: {
+              mimeType: mediaType,
+              data: base64Image
+            }
+          },
+          { text: INVOICE_EXTRACTION_PROMPT }
+        ]
+      },
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            supplier: { type: Type.STRING },
+            date: { type: Type.STRING },
+            currency: { type: Type.STRING },
+            items: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  quantity: { type: Type.NUMBER },
+                  unit: { type: Type.STRING },
+                  price: { type: Type.NUMBER },
+                  total: { type: Type.NUMBER }
+                },
+                required: ['name', 'quantity', 'unit', 'price', 'total']
+              }
+            },
+            subtotal: { type: Type.NUMBER },
+            total: { type: Type.NUMBER }
+          },
+          required: ['supplier', 'date', 'items', 'subtotal', 'total', 'currency']
+        }
       }
-    )
+    })
 
-    console.log('Texto extraído:', data.text)
+    const text = response.text
 
-    // Parsear el texto extraído
-    const invoiceData = parseInvoiceText(data.text)
+    if (!text) {
+      return NextResponse.json(
+        { message: 'No se pudo obtener respuesta de Gemini AI' },
+        { status: 500 }
+      )
+    }
 
-    console.log('Datos parseados:', invoiceData)
+    console.log('Respuesta JSON de Gemini:', text)
 
-    // Validar que se hayan extraído datos mínimos
-    if (!invoiceData.supplier || invoiceData.items.length === 0) {
+    // Con responseMimeType: 'application/json', la respuesta ya es JSON válido
+    let invoiceData: InvoiceData
+    try {
+      invoiceData = JSON.parse(text)
+    } catch (parseError) {
+      console.error('Error parseando JSON de Gemini:', parseError)
+      console.error('Texto recibido:', text)
       return NextResponse.json(
         {
-          message: 'No se pudieron extraer datos suficientes de la factura. Asegúrate de que la imagen sea clara y esté bien iluminada.',
-          extractedText: data.text.substring(0, 500) // Primeros 500 caracteres para debug
+          message: 'No se pudo procesar la respuesta de la IA. Intenta con una imagen más clara.',
+          debug: text.substring(0, 500)
         },
         { status: 400 }
       )
     }
 
+    // Validar que se hayan extraído datos mínimos
+    if (!invoiceData.supplier || !invoiceData.items || invoiceData.items.length === 0) {
+      return NextResponse.json(
+        {
+          message: 'No se pudieron extraer productos de la factura. Asegúrate de que la imagen sea clara y contenga productos.',
+          extractedData: invoiceData
+        },
+        { status: 400 }
+      )
+    }
+
+    console.log(`✅ Factura procesada exitosamente: ${invoiceData.items.length} productos extraídos`)
+
     return NextResponse.json(invoiceData)
 
   } catch (error: any) {
     console.error('Error procesando factura:', error)
+
+    // Manejar errores específicos
+    if (error.message?.includes('API key')) {
+      return NextResponse.json(
+        { message: 'Error de autenticación con el servicio de IA. Contacte al administrador.' },
+        { status: 500 }
+      )
+    }
+
+    if (error.message?.includes('quota') || error.message?.includes('limit')) {
+      return NextResponse.json(
+        { message: 'Límite de procesamiento alcanzado. Intenta nuevamente más tarde.' },
+        { status: 429 }
+      )
+    }
+
     return NextResponse.json(
       { message: error.message || 'Error al procesar la factura' },
       { status: 500 }
