@@ -72,24 +72,23 @@ export function DeleteConfirmationModal({
           )}
         </div>
 
-        <DialogFooter className="px-6 py-4 border-t border-gray-200 flex gap-3 justify-end">
-          <Button
+        <DialogFooter className="px-6 py-4 border-t border-gray-200 flex gap-2 justify-end">
+          <button
             type="button"
-            variant="ghost"
             onClick={onClose}
             disabled={isLoading}
-            className="px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-100 rounded"
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancelar
-          </Button>
-          <Button
+          </button>
+          <button
             type="button"
             onClick={onConfirm}
             disabled={isLoading}
-            className="px-6 py-2.5 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? "Eliminando..." : "Eliminar"}
-          </Button>
+          </button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -92,7 +92,7 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     costPerUnit: string
   }>>([])
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
-  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null)
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string; type: 'item' | 'unmatched'; index?: number } | null>(null)
   const [isDeletingItem, setIsDeletingItem] = useState(false)
 
   const [formData, setFormData] = useState({
@@ -641,11 +641,6 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
     }
   }
 
-  const handleRemoveUnmatchedItem = (index: number) => {
-    setUnmatchedItems(prev => prev.filter((_, i) => i !== index))
-    toast.success("Producto sin coincidencia eliminado")
-  }
-
   const handleCreateArticleFromUnmatched = (unmatchedItem: any, index: number) => {
     // Prellenar el formulario de creación rápida con los datos del producto sin coincidencia
     setQuickCreateArticleData({
@@ -662,7 +657,12 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
   }
 
   const openDeleteItemModal = (id: string, name: string) => {
-    setItemToDelete({ id, name })
+    setItemToDelete({ id, name, type: 'item' })
+    setDeleteModalOpen(true)
+  }
+
+  const openDeleteUnmatchedModal = (index: number, name: string) => {
+    setItemToDelete({ id: index.toString(), name, type: 'unmatched', index })
     setDeleteModalOpen(true)
   }
 
@@ -677,15 +677,23 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
 
     setIsDeletingItem(true)
 
-    const itemToRemove = items.find(item => item.id === itemToDelete.id)
+    if (itemToDelete.type === 'item') {
+      // Eliminar item de la compra
+      const itemToRemove = items.find(item => item.id === itemToDelete.id)
 
-    // Si el item tiene un articleId temporal, también eliminarlo de pendingArticles
-    if (itemToRemove && itemToRemove.articleId.startsWith('pending-')) {
-      setPendingArticles(prev => prev.filter(pa => pa.tempId !== itemToRemove.articleId))
+      // Si el item tiene un articleId temporal, también eliminarlo de pendingArticles
+      if (itemToRemove && itemToRemove.articleId.startsWith('pending-')) {
+        setPendingArticles(prev => prev.filter(pa => pa.tempId !== itemToRemove.articleId))
+      }
+
+      setItems(items.filter(item => item.id !== itemToDelete.id))
+      toast.success('Artículo eliminado de la compra')
+    } else if (itemToDelete.type === 'unmatched' && itemToDelete.index !== undefined) {
+      // Eliminar producto sin coincidencia
+      setUnmatchedItems(prev => prev.filter((_, i) => i !== itemToDelete.index))
+      toast.success('Producto sin coincidencia eliminado')
     }
 
-    setItems(items.filter(item => item.id !== itemToDelete.id))
-    toast.success('Artículo eliminado de la compra')
     closeDeleteItemModal()
   }
 
@@ -1479,8 +1487,8 @@ export default function PurchaseForm({ purchaseId }: PurchaseFormProps = {}) {
                           </div>
                         </div>
                         <button
-                          onClick={() => handleRemoveUnmatchedItem(index)}
-                          className="text-red-600 hover:text-red-700 p-2 hover:bg-red-100 rounded-lg transition-colors"
+                          onClick={() => openDeleteUnmatchedModal(index, item.name)}
+                          className="text-red-600 hover:text-red-700 p-2 hover:bg-red-100 rounded-lg transition-colors cursor-pointer"
                           title="Eliminar producto sin coincidencia"
                         >
                           <Trash2 size={18} />
