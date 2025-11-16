@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
 
 interface InvoiceItem {
   name: string
@@ -18,10 +17,8 @@ interface InvoiceData {
   currency: string
 }
 
-// Inicializar Gemini API
-// TEMPORAL: Hardcoded API key (mover a .env después de resolver el problema)
+// API Key de Gemini
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyA4vWfXWpO5-u2tlXlYe2hfR_QhzP0Lmco'
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
 
 // Prompt optimizado para extracción de datos de facturas
 const INVOICE_EXTRACTION_PROMPT = `
@@ -62,13 +59,6 @@ Responde SOLO con el JSON, sin explicaciones adicionales.
 
 export async function POST(request: NextRequest) {
   try {
-    // Debug: Verificar variables de entorno
-    console.log('=== DEBUG VARIABLES DE ENTORNO ===')
-    console.log('GEMINI_API_KEY existe:', !!process.env.GEMINI_API_KEY)
-    console.log('GEMINI_API_KEY length:', process.env.GEMINI_API_KEY?.length || 0)
-    console.log('GEMINI_API_KEY primeros 10 chars:', process.env.GEMINI_API_KEY?.substring(0, 10) || 'undefined')
-    console.log('===================================')
-
     const formData = await request.formData()
     const file = formData.get('file') as File
 
@@ -91,7 +81,6 @@ export async function POST(request: NextRequest) {
     // Validar que la API key esté configurada
     if (!GEMINI_API_KEY || GEMINI_API_KEY === '') {
       console.error('GEMINI_API_KEY no está configurada')
-      console.error('Todas las variables de entorno:', Object.keys(process.env).filter(k => k.includes('GEMINI')))
       return NextResponse.json(
         { message: 'Error de configuración del servidor. Contacte al administrador.' },
         { status: 500 }
@@ -103,29 +92,61 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(bytes)
     const base64Image = buffer.toString('base64')
 
-    console.log('Procesando factura con Gemini AI...')
+    console.log('Procesando factura con Gemini AI (API REST)...')
     console.log(`Tamaño de imagen: ${(bytes.byteLength / 1024).toFixed(2)} KB`)
 
-    // Configurar el modelo Gemini 1.5 Flash
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash'
+    // Llamar directamente a la API REST de Gemini usando la v1 (no beta)
+    const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`
+
+    const requestBody = {
+      contents: [{
+        parts: [
+          { text: INVOICE_EXTRACTION_PROMPT },
+          {
+            inlineData: {
+              mimeType: mediaType,
+              data: base64Image
+            }
+          }
+        ]
+      }]
+    }
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody)
     })
 
-    // Generar contenido con la imagen y el prompt
-    const result = await model.generateContent([
-      INVOICE_EXTRACTION_PROMPT,
-      {
-        inlineData: {
-          data: base64Image,
-          mimeType: mediaType
-        }
-      }
-    ])
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Error de Gemini API:', response.status, errorText)
 
-    const response = await result.response
-    const text = response.text()
+      return NextResponse.json(
+        {
+          message: `Error al procesar la factura con Gemini AI (${response.status})`,
+          debug: errorText.substring(0, 500)
+        },
+        { status: response.status }
+      )
+    }
 
-    console.log('Respuesta de Gemini:', text)
+    const data = await response.json()
+    console.log('Respuesta de Gemini:', JSON.stringify(data, null, 2))
+
+    // Extraer el texto de la respuesta
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+
+    if (!text) {
+      return NextResponse.json(
+        { message: 'No se pudo obtener respuesta de Gemini AI' },
+        { status: 500 }
+      )
+    }
+
+    console.log('Texto extraído de Gemini:', text)
 
     // Parsear el JSON de la respuesta
     // Gemini a veces devuelve el JSON dentro de bloques de código markdown
@@ -171,7 +192,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Error procesando factura:', error)
 
-    // Manejar errores específicos de la API de Gemini
+    // Manejar errores específicos
     if (error.message?.includes('API key')) {
       return NextResponse.json(
         { message: 'Error de autenticación con el servicio de IA. Contacte al administrador.' },
