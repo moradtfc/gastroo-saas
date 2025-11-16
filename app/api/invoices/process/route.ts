@@ -95,8 +95,8 @@ export async function POST(request: NextRequest) {
     console.log('Procesando factura con Gemini AI (API REST)...')
     console.log(`Tamaño de imagen: ${(bytes.byteLength / 1024).toFixed(2)} KB`)
 
-    // Llamar directamente a la API REST de Gemini usando la v1 (no beta)
-    const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`
+    // Llamar directamente a la API REST de Gemini usando v1beta
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`
 
     const requestBody = {
       contents: [{
