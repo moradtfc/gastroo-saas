@@ -171,6 +171,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Filtrar productos con cantidad o total negativo (promociones/descuentos)
+    const originalItemsCount = invoiceData.items.length
+    invoiceData.items = invoiceData.items.filter(item => item.quantity > 0 && item.total > 0)
+
+    if (originalItemsCount > invoiceData.items.length) {
+      const filteredCount = originalItemsCount - invoiceData.items.length
+      console.log(`✓ Filtrados ${filteredCount} item(s) con valores negativos (promociones/descuentos)`)
+    }
+
     // Validar que se hayan extraído datos mínimos
     if (!invoiceData.supplier || !invoiceData.items || invoiceData.items.length === 0) {
       return NextResponse.json(
