@@ -10,11 +10,11 @@ const nextConfig = {
     unoptimized: true,
   },
   experimental: {
-    serverComponentsExternalPackages: ['tesseract.js'],
+    serverComponentsExternalPackages: ['@google/genai', 'ws'],
   },
   webpack: (config, { isServer }) => {
     if (isServer) {
-      config.externals.push('tesseract.js')
+      config.externals.push('@google/genai', 'ws')
     }
     return config
   },
