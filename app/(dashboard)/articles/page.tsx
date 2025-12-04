@@ -66,6 +66,9 @@ export default function ArticlesPage() {
   const [importFile, setImportFile] = useState<File | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [isErrorModalOpen, setIsErrorModalOpen] = useState(false)
+  const [importErrors, setImportErrors] = useState<string[]>([])
+  const [importSuccessCount, setImportSuccessCount] = useState(0)
 
   useEffect(() => {
     loadArticles()
@@ -450,7 +453,10 @@ export default function ArticlesPage() {
       }
 
       if (errorCount > 0) {
-        toast.error(`${errorCount} artículo(s) con errores. Revisa la consola para más detalles.`)
+        // Guardar errores en el estado y abrir modal
+        setImportErrors(errors)
+        setImportSuccessCount(successCount)
+        setIsErrorModalOpen(true)
         console.error('Errores de importación:', errors)
       }
 
@@ -894,6 +900,74 @@ export default function ArticlesPage() {
             className="bg-blue-600 hover:bg-blue-700 text-white"
           >
             {isProcessing ? "Importando..." : "Subir Inventario"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Modal de Errores de Importación */}
+    <Dialog open={isErrorModalOpen} onOpenChange={setIsErrorModalOpen}>
+      <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-xl flex items-center gap-2">
+            <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+              <span className="text-red-600 text-xl">⚠️</span>
+            </div>
+            Errores de Importación
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto space-y-4 py-4">
+          {/* Resumen */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <p className="text-sm text-green-900 font-medium mb-1">Artículos importados</p>
+              <p className="text-2xl font-bold text-green-600">{importSuccessCount}</p>
+            </div>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-sm text-red-900 font-medium mb-1">Artículos con errores</p>
+              <p className="text-2xl font-bold text-red-600">{importErrors.length}</p>
+            </div>
+          </div>
+
+          {/* Lista de errores */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-3">
+              Detalle de los errores encontrados:
+            </p>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg divide-y divide-gray-200">
+              {importErrors.map((error, index) => (
+                <div key={index} className="px-4 py-3 hover:bg-gray-100 transition-colors">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 w-6 h-6 bg-red-100 rounded-full flex items-center justify-center mt-0.5">
+                      <span className="text-red-600 text-xs font-bold">{index + 1}</span>
+                    </div>
+                    <p className="text-sm text-gray-800 flex-1">{error}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Sugerencias */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-900 font-medium mb-2">💡 Sugerencias:</p>
+            <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+              <li>Verifica que las categorías existan en el sistema</li>
+              <li>Asegúrate de usar los símbolos exactos de las unidades (kg, L, g, etc.)</li>
+              <li>Los costos deben ser números mayores a 0</li>
+              <li>El stock debe ser un número mayor o igual a 0</li>
+              <li>Descarga la plantilla nuevamente para ver las categorías y unidades disponibles</li>
+            </ul>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            onClick={() => setIsErrorModalOpen(false)}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            Entendido
           </Button>
         </DialogFooter>
       </DialogContent>
